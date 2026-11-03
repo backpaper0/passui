@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # 統合テストは pass か gpg がないと t.Skip する。CI ではスキップを失敗にする。
+      PASSUI_REQUIRE_INTEGRATION: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install pass and gnupg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pass gnupg
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test -race ./...
