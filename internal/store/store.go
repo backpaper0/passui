@@ -40,6 +40,9 @@ type Backend interface {
 	// 名前が正しくなければ ErrInvalidName、末尾が "/" か同名のディレクトリがあれば
 	// ErrIsDirectory、同じ名前のエントリがあれば ErrExists を返し、ストアを変えない。
 	Create(ctx context.Context, name string, content secret.Value) error
+	// Delete はエントリ name を消す（pass rm -f）。復号しないのでロック中でも消せる。
+	// エントリがなければ ErrNotFound を返す。
+	Delete(ctx context.Context, name string) error
 }
 
 // 分類したエラー。Backend の実装はこれらを（必要なら %w で包んで）返す。

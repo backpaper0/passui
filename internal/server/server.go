@@ -63,6 +63,8 @@ func (s *handler) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /lock-status", s.lockStatus)
 	mux.HandleFunc("GET /new", s.newEntryForm)
 	mux.HandleFunc("POST /new", s.createEntry)
+	mux.HandleFunc("GET /delete/{name...}", s.confirmDelete)
+	mux.HandleFunc("POST /delete/{name...}", s.deleteEntry)
 }
 
 type indexData struct {
