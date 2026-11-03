@@ -36,6 +36,10 @@ type newEntryData struct {
 	Selected string
 	// Failure が空でなければ、フォームの上に出す。
 	Failure string
+	// Generate、Length、NoSymbols は「生成する」を選んだときの入力（generate.go）。
+	Generate  bool
+	Length    string
+	NoSymbols bool
 }
 
 // newEntryForm は GET /new。新規作成フォームを右ペインに返す。クエリの selected は
@@ -62,6 +66,10 @@ func defaultFolder(selected string) string {
 func (s *handler) createEntry(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		writeFailure(w, r, s.logger, "parse form", "err", err)
+		return
+	}
+	if r.PostForm.Get("mode") == "generate" {
+		s.generateEntry(w, r)
 		return
 	}
 	data := newEntryData{

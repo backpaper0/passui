@@ -5,9 +5,13 @@
 <input type="hidden" id="selected-entry" name="selected" value="{{.Selected}}">
 <label for="new-path">パス</label>
 <input id="new-path" name="path" value="{{.Path}}" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="email/work">
+{{template "new-mode" .}}
+<div class="manual-fields">
 <label for="new-content">本文</label>
-<textarea id="new-content" name="content" rows="8" required autocomplete="off" autocapitalize="off" spellcheck="false">
+<textarea id="new-content" name="content" rows="8" autocomplete="off" autocapitalize="off" spellcheck="false">
 {{.Content}}</textarea>
 <p class="hint">1 行目がパスワードです。2 行目以降に <code>key: value</code> を書けます。</p>
+</div>
+{{template "generate-fields" .}}
 <button type="submit">作成</button>
 </form>
