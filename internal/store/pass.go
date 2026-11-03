@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -53,40 +54,58 @@ func NewPass(cfg PassConfig, logger *slog.Logger) *Pass {
 
 // Entries はストアのディレクトリを走査して、*.gpg のエントリを名前順に返す。
 // "." で始まるファイルとディレクトリ（.git、.gpg-id、.extensions など）は見ない。
+// pass ls（tree -l）と同じくシンボリックリンクのディレクトリもたどるが、祖先を指す
+// リンク（循環）はたどらない。リンク先がないリンクは無視する。
 // ストアのディレクトリがなければ空を返す。
 func (p *Pass) Entries(ctx context.Context) ([]string, error) {
-	var names []string
-	err := filepath.WalkDir(p.cfg.Dir, func(file string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if file == p.cfg.Dir && errors.Is(err, fs.ErrNotExist) {
-				return fs.SkipAll
-			}
-			return err
-		}
-		if file == p.cfg.Dir {
-			return nil
-		}
-		if strings.HasPrefix(d.Name(), ".") {
-			if d.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if d.IsDir() || !strings.HasSuffix(d.Name(), ".gpg") {
-			return nil
-		}
-		rel, err := filepath.Rel(p.cfg.Dir, file)
-		if err != nil {
-			return err
-		}
-		names = append(names, strings.TrimSuffix(filepath.ToSlash(rel), ".gpg"))
-		return ctx.Err()
-	})
+	root, err := os.Stat(p.cfg.Dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
 	if err != nil {
+		return nil, fmt.Errorf("walk store: %w", err)
+	}
+	var names []string
+	if err := p.walk(ctx, p.cfg.Dir, "", []fs.FileInfo{root}, &names); err != nil {
 		return nil, fmt.Errorf("walk store: %w", err)
 	}
 	sort.Strings(names)
 	return names, nil
+}
+
+// walk はストアの中のディレクトリ dir（ストアからの相対パスは rel）のエントリを names に
+// 足す。ancestors は dir とその祖先で、循環の検出に使う。
+func (p *Pass) walk(ctx context.Context, dir, rel string, ancestors []fs.FileInfo, names *[]string) error {
+	des, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, d := range des {
+		if strings.HasPrefix(d.Name(), ".") {
+			continue
+		}
+		file := filepath.Join(dir, d.Name())
+		name := path.Join(rel, d.Name())
+		fi, err := os.Stat(file) // シンボリックリンクはリンク先を見る
+		if err != nil {
+			if absent(err) {
+				continue // リンク先がない
+			}
+			return err
+		}
+		switch {
+		case fi.IsDir():
+			if slices.ContainsFunc(ancestors, func(a fs.FileInfo) bool { return os.SameFile(a, fi) }) {
+				continue // 循環
+			}
+			if err := p.walk(ctx, file, name, append(slices.Clip(ancestors), fi), names); err != nil {
+				return err
+			}
+		case fi.Mode().IsRegular() && strings.HasSuffix(name, ".gpg"):
+			*names = append(*names, strings.TrimSuffix(name, ".gpg"))
+		}
+	}
+	return ctx.Err()
 }
 
 // Exists はエントリのファイル（name.gpg）があるかを返す。

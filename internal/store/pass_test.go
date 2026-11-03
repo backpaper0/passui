@@ -63,6 +63,36 @@ func TestEntriesUsesOnlyGPGFileNames(t *testing.T) {
 	}
 }
 
+// pass ls（tree -l）と同じく、シンボリックリンクのディレクトリをたどる。自分の祖先を
+// 指すリンク（循環）はたどらない。
+func TestEntriesFollowsSymlinkedDirectoriesWithoutLooping(t *testing.T) {
+	p, cfg, _ := newTestPass(t, store.PassConfig{})
+	outside := t.TempDir()
+	writeFile(t, outside, "team/token.gpg", "x")
+	writeFile(t, cfg.Dir, "email/work.gpg", "x")
+	for link, target := range map[string]string{
+		"shared":     outside,                         // ストアの外のディレクトリ
+		"alias":      filepath.Join(cfg.Dir, "email"), // ストアの中のディレクトリ
+		"email/loop": "..",                            // 祖先（ストアのルート）を指す循環
+		"email/self": ".",                             // 自分を指す循環
+		"broken":     filepath.Join(outside, "no-such-dir"),
+	} {
+		if err := os.Symlink(target, filepath.Join(cfg.Dir, filepath.FromSlash(link))); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := p.Entries(context.Background())
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"alias/work", "email/work", "shared/team/token"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Entries = %q, want %q", got, want)
+	}
+}
+
 func TestEntriesOfMissingStoreIsEmpty(t *testing.T) {
 	p, _, _ := newTestPass(t, store.PassConfig{Dir: filepath.Join(t.TempDir(), "no-such-store")})
 
