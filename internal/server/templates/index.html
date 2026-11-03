@@ -18,7 +18,15 @@
 </header>
 <main class="panes">
 <nav id="left-pane" class="pane" aria-label="ストア">
+<!-- 検索語が空でなければ /tree は検索結果を返す。空にするとツリーに戻る。 -->
+<input id="search" class="search" type="search" name="q"
+       placeholder="検索" aria-label="エントリを検索" autocomplete="off"
+       hx-get="/tree"
+       hx-trigger="input changed delay:200ms, search"
+       hx-target="#tree"
+       hx-swap="innerHTML">
 <div id="tree"
+     hx-include="#search"
      hx-get="/tree"
      hx-trigger="visibilitychange[document.visibilityState === 'visible'] from:document"
      hx-swap="innerHTML">
