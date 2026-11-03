@@ -253,6 +253,25 @@ func TestStateChangingRequestFromSameOriginIsAccepted(t *testing.T) {
 	}
 }
 
+// Origin も Sec-Fetch-Site もない状態変更リクエストは、ブラウザ以外（curl など）か、
+// どちらのヘッダも送らない古いブラウザからのものとみなして通す。他オリジンのページから
+// ブラウザが送るリクエストには、今のブラウザなら必ずどちらかが付く。通した後もセッションの
+// 確認があり、セッション Cookie は SameSite=Strict なので他サイトからは付かない。
+func TestStateChangingRequestWithoutOriginHeadersIsLeftToSessionCheck(t *testing.T) {
+	srv := passuitest.New(t).Serve(passuitest.Options{})
+
+	// セッションがあれば通す。
+	if res := srv.Do(srv.NewRequest(http.MethodPost, "/logout", "")); res.StatusCode != http.StatusSeeOther {
+		t.Errorf("with session: status = %d, want 303", res.StatusCode)
+	}
+
+	// セッションがなければ、Origin の検証は通ってもセッションの確認で 401。
+	anon := passuitest.New(t).Serve(passuitest.Options{Anonymous: true})
+	if res := anon.Do(anon.NewRequest(http.MethodPost, "/lock", "")); res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("without session: status = %d, want 401", res.StatusCode)
+	}
+}
+
 func TestSafeMethodsSkipOriginCheck(t *testing.T) {
 	srv := passuitest.New(t).Serve(passuitest.Options{})
 

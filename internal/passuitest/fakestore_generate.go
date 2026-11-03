@@ -42,16 +42,8 @@ func (f *FakeStore) Generate(ctx context.Context, name string, opts store.Genera
 	if f.err != nil {
 		return f.err
 	}
-	if err := store.CheckNewName(name); err != nil {
-		return fmt.Errorf("generate %s: %w", name, err)
-	}
-	for n := range f.entries {
-		if strings.HasPrefix(n, name+"/") {
-			return fmt.Errorf("generate %s: %w", name, store.ErrIsDirectory)
-		}
-	}
-	if _, ok := f.entries[name]; ok {
-		return fmt.Errorf("generate %s: %w", name, store.ErrExists)
+	if err := f.checkDestination(name); err != nil {
+		return fmt.Errorf("generate %q: %w", name, err)
 	}
 	f.entries[name] = fakePassword(opts) + "\n"
 	return nil
@@ -67,10 +59,10 @@ func (f *FakeStore) Regenerate(ctx context.Context, name string, opts store.Gene
 	}
 	c, ok := f.entries[name]
 	if !ok {
-		return fmt.Errorf("regenerate %s: %w", name, store.ErrNotFound)
+		return fmt.Errorf("regenerate %q: %w", name, store.ErrNotFound)
 	}
 	if f.locked {
-		return fmt.Errorf("regenerate %s: %w", name, store.ErrLocked)
+		return fmt.Errorf("regenerate %q: %w", name, store.ErrLocked)
 	}
 	_, rest, _ := strings.Cut(c, "\n")
 	f.entries[name] = fakePassword(opts) + "\n" + rest

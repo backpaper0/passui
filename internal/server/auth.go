@@ -44,6 +44,24 @@ func (s *sessions) delete(id string) {
 	delete(s.ids, id)
 }
 
+// sessionCookie はセッション Cookie を作る。発行（login）と削除（logout、maxAge は -1）で
+// 属性を揃える。SameSite=Strict なので、他サイトからのリクエストには付かない。
+func sessionCookie(value string, maxAge int) *http.Cookie {
+	return &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    value,
+		Path:     "/",
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	}
+}
+
+// isHTMX は htmx が送ったリクエストかを返す。
+func isHTMX(r *http.Request) bool {
+	return r.Header.Get("HX-Request") == "true"
+}
+
 // loginHost は Cookie を発行してよい Host。localhost や 127.0.0.1 の Cookie は、
 // ホストのほかの開発サーバーにも送られてしまうので、passui.localhost に限る。
 func loginHost(port int) string {
@@ -64,13 +82,7 @@ func (s *handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := s.sessions.create()
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    id.Reveal(),
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-	})
+	http.SetCookie(w, sessionCookie(id.Reveal(), 0))
 	s.logger.InfoContext(r.Context(), "logged in")
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
@@ -80,14 +92,7 @@ func (s *handler) logout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(sessionCookieName); err == nil {
 		s.sessions.delete(c.Value)
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-	})
+	http.SetCookie(w, sessionCookie("", -1))
 	s.logger.InfoContext(r.Context(), "logged out")
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
@@ -105,7 +110,7 @@ func (s *handler) requireSession(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if r.Header.Get("HX-Request") == "true" {
+		if isHTMX(r) {
 			w.Header().Set("HX-Refresh", "true")
 		}
 		s.render(w, r, http.StatusUnauthorized, "login_required.html", loginRequiredData{})
@@ -130,7 +135,13 @@ func isSafeMethod(method string) bool {
 // checkOrigin は状態を変えるメソッドで、他オリジンからのリクエストを 403 で拒否する。
 // Origin があれば http://<Host> と一致するかを見る（Host は checkHost で検証済み）。
 // Origin がなければ Sec-Fetch-Site を見て、same-origin と none だけを通す。
-// どちらもなければブラウザ以外からのリクエストとみなして通す（セッションの確認は別にある）。
+//
+// どちらもなければ通す。今のブラウザは、他オリジンのページから送らせた状態変更の
+// リクエストに Origin か Sec-Fetch-Site の少なくとも一方を必ず付けるので、どちらもない
+// リクエストはブラウザ以外（curl やスクリプト）か古いブラウザからのものである。前者は
+// CSRF の経路にならず、後者に対しても、この後のセッションの確認（Cookie は
+// SameSite=Strict で他サイトからは付かない）が守る。拒否すると、ヘッダを付けない
+// クライアントからの正当な操作まで使えなくなる。
 func checkOrigin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isSafeMethod(r.Method) || sameOrigin(r) {

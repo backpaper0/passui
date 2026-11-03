@@ -31,10 +31,7 @@ func (s *handler) generateEntry(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.cfg.Store.Generate(r.Context(), data.Path, opts); err != nil {
-		status, msg := s.storeFailure(r, err, "generate entry", "entry", data.Path)
-		if errors.Is(err, store.ErrIsDirectory) && strings.HasSuffix(data.Path, "/") {
-			msg = "パスの末尾が / です。エントリの名前まで入力してください"
-		}
+		status, msg := s.destinationFailure(r, err, data.Path, "generate entry", "entry", data.Path)
 		data.Failure = msg
 		s.render(w, r, status, "new.html", data)
 		return

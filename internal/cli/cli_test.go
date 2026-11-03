@@ -180,6 +180,48 @@ func TestServeListensOnLoopbackUntilCancelled(t *testing.T) {
 	}
 }
 
+// ブラウザは keep-alive の接続を開いたままにし、先回りで接続だけを張ることもある。
+// そうした接続が残っていても、serve は止まり、正常終了（0）になる。
+func TestServeStopsNormallyWithIdleConnections(t *testing.T) {
+	port := strconv.Itoa(freePort(t))
+	env := []string{"PATH=" + fakePassDir(t), "PASSUI_PORT=" + port, runtimeDirEnv(t), homeEnv(t)}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stderr := &lockedBuffer{}
+	done := make(chan int, 1)
+	go func() { done <- cli.Run(ctx, []string{"serve"}, env, io.Discard, stderr) }()
+	getWithRetry(t, "http://127.0.0.1:"+port+"/", "passui.localhost:"+port).Body.Close()
+
+	// 応答を読み終えて keep-alive で残る接続。
+	keepAlive := &http.Client{Transport: &http.Transport{}}
+	defer keepAlive.CloseIdleConnections()
+	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+port+"/", nil)
+	req.Host = "passui.localhost:" + port
+	res, err := keepAlive.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, res.Body)
+	res.Body.Close()
+	// 接続しただけで、リクエストを送らない接続。
+	conn, err := net.Dial("tcp", "127.0.0.1:"+port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	time.Sleep(100 * time.Millisecond) // サーバーが接続を受け付けるのを待つ
+
+	cancel()
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Errorf("code = %d, want 0:\n%s", code, stderr.String())
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatalf("serve did not stop after cancel:\n%s", stderr.String())
+	}
+}
+
 func TestServeDefaultsToPort3560(t *testing.T) {
 	// 既定ポートを実際に掴むのは避け、3560 が使用中のときのエラーで確かめる。
 	l, err := net.Listen("tcp", "127.0.0.1:3560")
@@ -196,7 +238,8 @@ func TestServeDefaultsToPort3560(t *testing.T) {
 }
 
 // testClient は接続を使い回さない。使い回すと Transport が使われない接続を先に張ることがあり、
-// その接続が Shutdown を 5 秒待たせる（StateNew の接続は 5 秒たつまで idle とみなされない）。
+// その接続が serve の停止を 5 秒待たせる（StateNew の接続は 5 秒たつまで idle とみなされず、
+// 待つ期限が来てから切られる）。テストを遅くしないため。
 var testClient = &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
 
 func getWithRetry(t *testing.T, url, host string) *http.Response {

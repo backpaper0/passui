@@ -23,6 +23,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 	"entryURL":      entryURL,
 	"editURL":       editURL,
 	"regenerateURL": regenerateURL,
+	"deleteURL":     deleteURL,
 }).ParseFS(templateFS, "templates/*.html"))
 
 // Config は Handler の設定である。
@@ -50,7 +51,7 @@ type handler struct {
 	sessions *sessions
 }
 
-// routes にルートを登録する。以降のチケットはここに足す。
+// routes にルートを登録する。
 func (s *handler) routes(mux *http.ServeMux) {
 	static, err := fs.Sub(staticFS, "static")
 	if err != nil {

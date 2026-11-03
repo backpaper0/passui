@@ -83,6 +83,9 @@ func newLogger(w io.Writer, level slog.Leveler) *slog.Logger {
 	}))
 }
 
+// shutdownGrace は、止めるときに処理中のリクエストを待つ時間。
+const shutdownGrace = 5 * time.Second
+
 func serve(ctx context.Context, env environ, stderr io.Writer) int {
 	level := new(slog.LevelVar)
 	logger := newLogger(stderr, level)
@@ -157,9 +160,18 @@ func serve(ctx context.Context, env environ, stderr io.Writer) int {
 	case <-ctx.Done():
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// 処理中のリクエストは最大 shutdownGrace まで待つ。期限が来たら、残った接続
+	// （ブラウザが先回りで張っただけの接続など。Shutdown は張ってから 5 秒たつまで
+	// 使われていないとみなさない）を Close で切り、正常に止まったものとする。
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
+	if err := srv.Shutdown(shutdownCtx); errors.Is(err, context.DeadlineExceeded) {
+		logger.Warn("closing remaining connections", "grace", shutdownGrace)
+		if err := srv.Close(); err != nil {
+			logger.Error("shutdown", "err", err)
+			return 1
+		}
+	} else if err != nil {
 		logger.Error("shutdown", "err", err)
 		return 1
 	}

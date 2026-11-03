@@ -94,7 +94,7 @@ func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 // AllowedHosts は Handler が受け付ける Host ヘッダの一覧を返す（DNS rebinding 対策）。
 func AllowedHosts(port int) []string {
 	p := strconv.Itoa(port)
-	return []string{"passui.localhost:" + p, "localhost:" + p, "127.0.0.1:" + p}
+	return []string{loginHost(port), "localhost:" + p, "127.0.0.1:" + p}
 }
 
 // checkHost は許可していない Host ヘッダのリクエストを 421 で拒否する。

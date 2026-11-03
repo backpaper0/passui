@@ -109,7 +109,7 @@ func (s *handler) saveEdit(w http.ResponseWriter, r *http.Request) {
 		s.showEntry(w, r, data.Name, "エントリを保存しました。")
 		return
 	}
-	s.logger.InfoContext(r.Context(), "operation", "op", "move", "entry", data.Name, "to", data.Path)
+	s.logOperation(r, "move", data.Name, "to", data.Path)
 	triggerTreeReload(w)
 	s.showEntry(w, r, data.Path, "エントリを保存し、"+data.Path+" に移動しました。")
 }
@@ -136,10 +136,7 @@ func (s *handler) editFailure(w http.ResponseWriter, r *http.Request, data editD
 		return
 	}
 	if !errors.Is(err, store.ErrConflict) {
-		status, msg := s.storeFailure(r, err, "save entry", "entry", data.Name)
-		if errors.Is(err, store.ErrIsDirectory) && strings.HasSuffix(data.Path, "/") {
-			msg = "パスの末尾が / です。エントリの名前まで入力してください"
-		}
+		status, msg := s.destinationFailure(r, err, data.Path, "save entry", "entry", data.Name)
 		data.Failure = msg
 		s.render(w, r, status, "edit.html", data)
 		return

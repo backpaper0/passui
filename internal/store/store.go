@@ -18,8 +18,6 @@ import (
 // 返すエラーは分類してある。errors.Is で ErrLocked、ErrNotFound、ErrExists、
 // ErrIsDirectory、ErrConflict のどれかと比べ、どれでもなければ「そのほかの失敗」とする。
 // そのほかの失敗のエラー文には内部の情報が入りうるので、ブラウザには出さない。
-//
-// 以降のチケットで、追加、生成、削除、移動、明示ロックを足す。
 type Backend interface {
 	// Entries はストアのエントリを名前順で返す。ストアのディレクトリを走査し、
 	// *.gpg のファイル名だけを使う（復号しない。ロック中でも使える）。
@@ -35,7 +33,8 @@ type Backend interface {
 	// Locked はロック中か（ストアの鍵の解錠のキャッシュが gpg-agent にないか）を返す。
 	// gpg の文言ではなく、gpg-agent の KEYINFO の cached フラグで判定する。
 	Locked(ctx context.Context) (bool, error)
-	// Lock は gpg-agent から鍵の解錠のキャッシュを消す（明示ロック、CLEAR_PASSPHRASE）。
+	// Lock は gpg-agent から、ストアの鍵（ルートとサブフォルダの .gpg-id の鍵）の解錠の
+	// キャッシュを消す（明示ロック、CLEAR_PASSPHRASE）。ストアと関係のない鍵には触れない。
 	// キャッシュは gpg-agent のものなので、ターミナルの pass もロックされる。
 	Lock(ctx context.Context) error
 	// Create は新しいエントリ name を content で作る（pass insert -m -f）。暗号化だけなので
