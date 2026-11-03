@@ -23,6 +23,7 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 	"entryURL":      entryURL,
 	"editURL":       editURL,
 	"regenerateURL": regenerateURL,
+	"deleteURL":     deleteURL,
 }).ParseFS(templateFS, "templates/*.html"))
 
 // Config は Handler の設定である。

@@ -8,7 +8,7 @@
 <p class="notice" role="status">{{.Notice}}</p>
 {{- end}}
 <h2>{{.Name}}</h2>
-<button type="button" class="delete-button" hx-get="{{.DeleteURL}}" hx-target="#right-pane" hx-swap="innerHTML">削除</button>
+<button type="button" class="delete-button" hx-get="{{deleteURL .Name}}" hx-target="#right-pane" hx-swap="innerHTML">削除</button>
 <p class="error" role="alert">{{.Message}}</p>
 <p>ゲストのターミナルで次を実行してパスフレーズを入れ、ブラウザに戻ってください。</p>
 <pre><code id="unlock-command">{{.UnlockCommand}}</code></pre>

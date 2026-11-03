@@ -7,16 +7,12 @@ import (
 	"github.com/backpaper0/passui/internal/store"
 )
 
-// deleteURL はエントリの削除（確認と実行）の URL（/delete/<name>）を作る。
+// deleteURL はエントリの削除の URL（/delete/<name>）を作る。GET で確認を開き、POST で
+// 消す。テンプレートでは関数 deleteURL として使える（詳細と、ロック中の案内の「削除」。
+// 削除は復号しないのでロック中でもできる）。
 func deleteURL(name string) string {
 	return "/delete/" + escapePath(name)
 }
-
-// DeleteURL は詳細の見出しの「削除」が開く確認の URL。
-func (d entryData) DeleteURL() string { return deleteURL(d.Name) }
-
-// DeleteURL はロック中の案内の「削除」が開く確認の URL（削除は復号しないのでロック中でもできる）。
-func (d lockedData) DeleteURL() string { return deleteURL(d.Name) }
 
 // deleteData は delete.html（削除の確認）と deleted.html（削除の結果）に渡す。
 type deleteData struct {
@@ -24,12 +20,6 @@ type deleteData struct {
 	// Failure が空でなければ、確認の上に出す。
 	Failure string
 }
-
-// DeleteURL は確認の「削除する」が POST する URL。
-func (d deleteData) DeleteURL() string { return deleteURL(d.Name) }
-
-// EntryURL は確認の「やめる」で戻る詳細の URL。
-func (d deleteData) EntryURL() string { return entryURL(d.Name) }
 
 // confirmDelete は GET /delete/{name...}。右ペインに削除の確認を返す。ストアは変えない。
 func (s *handler) confirmDelete(w http.ResponseWriter, r *http.Request) {

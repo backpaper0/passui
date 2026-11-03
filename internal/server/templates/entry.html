@@ -7,7 +7,7 @@
 <p class="entry-actions">
 <button type="button" hx-get="{{editURL .Name}}" hx-target="#right-pane" hx-swap="innerHTML">編集</button>
 {{template "regenerate-button" .Name}}
-<button type="button" class="delete-button" hx-get="{{.DeleteURL}}" hx-target="#right-pane" hx-swap="innerHTML">削除</button>
+<button type="button" class="delete-button" hx-get="{{deleteURL .Name}}" hx-target="#right-pane" hx-swap="innerHTML">削除</button>
 </p>
 <div class="password-row">
 <label for="entry-password">パスワード</label>
