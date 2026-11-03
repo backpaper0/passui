@@ -130,7 +130,13 @@ func isSafeMethod(method string) bool {
 // checkOrigin は状態を変えるメソッドで、他オリジンからのリクエストを 403 で拒否する。
 // Origin があれば http://<Host> と一致するかを見る（Host は checkHost で検証済み）。
 // Origin がなければ Sec-Fetch-Site を見て、same-origin と none だけを通す。
-// どちらもなければブラウザ以外からのリクエストとみなして通す（セッションの確認は別にある）。
+//
+// どちらもなければ通す。今のブラウザは、他オリジンのページから送らせた状態変更の
+// リクエストに Origin か Sec-Fetch-Site の少なくとも一方を必ず付けるので、どちらもない
+// リクエストはブラウザ以外（curl やスクリプト）か古いブラウザからのものである。前者は
+// CSRF の経路にならず、後者に対しても、この後のセッションの確認（Cookie は
+// SameSite=Strict で他サイトからは付かない）が守る。拒否すると、ヘッダを付けない
+// クライアントからの正当な操作まで使えなくなる。
 func checkOrigin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isSafeMethod(r.Method) || sameOrigin(r) {
