@@ -2,7 +2,7 @@
 
 ### Issue tracker
 
-Issues are tracked in GitHub Issues (backpaper0/passage) via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues are tracked in GitHub Issues (backpaper0/passui) via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
