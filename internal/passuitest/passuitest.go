@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/hex"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -68,6 +69,12 @@ func (h *Harness) AddCanary(s string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.canaries = append(h.canaries, s)
+}
+
+// LogWriter は Logger と同じバッファに書く io.Writer を返す。自前でロガーを作る
+// コンポーネント（cli.Run の stderr など）の出力もカナリア検査の対象にするのに使う。
+func (h *Harness) LogWriter() io.Writer {
+	return h.buf
 }
 
 // Logs はここまでに集めたログを返す。

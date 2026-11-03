@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/backpaper0/passui/internal/cli"
+	"github.com/backpaper0/passui/internal/passuitest"
 )
 
 // runtimeDirEnv は使い捨ての XDG_RUNTIME_DIR を "KEY=VALUE" で返す。
@@ -87,9 +88,10 @@ func TestServeWritesTokenAndLoginPrintsWorkingURL(t *testing.T) {
 		"PASSWORD_STORE_DIR=" + storeDir, "GNUPGHOME=" + t.TempDir()}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stderr := &lockedBuffer{}
+	// serve のログは Harness に集め、トークンとセッション Cookie をカナリアにする。
+	h := passuitest.New(t)
 	done := make(chan int, 1)
-	go func() { done <- cli.Run(ctx, []string{"serve"}, env, &lockedBuffer{}, stderr) }()
+	go func() { done <- cli.Run(ctx, []string{"serve"}, env, io.Discard, h.LogWriter()) }()
 
 	res := getWithRetry(t, "http://127.0.0.1:"+port+"/", "passui.localhost:"+port)
 	res.Body.Close()
@@ -108,7 +110,9 @@ func TestServeWritesTokenAndLoginPrintsWorkingURL(t *testing.T) {
 		t.Fatalf("login URL = %q, want %s<token>", loginURL, prefix)
 	}
 	token := strings.TrimPrefix(loginURL, prefix)
+	h.AddCanary(token)
 	cookie := loginVia(t, port, loginURL)
+	h.AddCanary(cookie.Value)
 	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+port+"/", nil)
 	req.Host = "passui.localhost:" + port
 	req.AddCookie(cookie)
@@ -144,7 +148,7 @@ func TestServeWritesTokenAndLoginPrintsWorkingURL(t *testing.T) {
 			t.Errorf("serve code = %d, want 0", code)
 		}
 	case <-time.After(10 * time.Second):
-		t.Fatalf("serve did not stop after cancel:\n%s", stderr.String())
+		t.Fatalf("serve did not stop after cancel:\n%s", h.Logs())
 	}
 
 	// 正常に止まるとトークンが消え、login は「起動していない」と出す。
@@ -159,10 +163,6 @@ func TestServeWritesTokenAndLoginPrintsWorkingURL(t *testing.T) {
 		t.Errorf("login after stop: code=%d stdout=%q stderr=%q", r.code, r.stdout, r.stderr)
 	}
 
-	logs := stderr.String()
-	if strings.Contains(logs, token) || strings.Contains(logs, cookie.Value) {
-		t.Errorf("token or session cookie leaked into logs:\n%s", logs)
-	}
 }
 
 func TestServeKeepsAnotherInstancesTokenWhenPortInUse(t *testing.T) {
