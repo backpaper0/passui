@@ -6,8 +6,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
+	"github.com/backpaper0/passui/internal/secret"
 	"github.com/backpaper0/passui/internal/store"
 )
 
@@ -88,4 +90,35 @@ func (f *FakeStore) Hash(ctx context.Context, name string) (string, error) {
 	}
 	sum := sha256.Sum256([]byte(c))
 	return hex.EncodeToString(sum[:]), nil
+}
+
+// Create は store.Pass.Create と同じ確認をしてからエントリを置く。「暗号文」は
+// ストアに書かれる本文（末尾に改行が付いたもの）そのものにする（Content で読める）。
+func (f *FakeStore) Create(ctx context.Context, name string, content secret.Value) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return f.err
+	}
+	if err := store.CheckNewName(name); err != nil {
+		return fmt.Errorf("create %s: %w", name, err)
+	}
+	for n := range f.entries {
+		if strings.HasPrefix(n, name+"/") {
+			return fmt.Errorf("create %s: %w", name, store.ErrIsDirectory)
+		}
+	}
+	if _, ok := f.entries[name]; ok {
+		return fmt.Errorf("create %s: %w", name, store.ErrExists)
+	}
+	f.entries[name] = store.WithTrailingNewline(content.Reveal())
+	return nil
+}
+
+// Content はエントリの「暗号文」を返す。Create で作ったエントリなら、書かれた本文。
+func (f *FakeStore) Content(name string) (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c, ok := f.entries[name]
+	return c, ok
 }

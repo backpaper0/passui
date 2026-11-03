@@ -43,3 +43,11 @@ body {
 
 .placeholder { color: #59636e; }
 .error { color: #d1242f; }
+
+.new-entry { margin-bottom: 0.75rem; }
+.entry-form { display: grid; gap: 0.5rem; max-width: 40rem; }
+.entry-form h2 { margin: 0; font-size: 1.125rem; }
+.entry-form input, .entry-form textarea { font: inherit; width: 100%; }
+.entry-form textarea { font-family: ui-monospace, monospace; }
+.entry-form button { justify-self: start; }
+.hint { margin: 0; color: #59636e; font-size: 0.875rem; }
