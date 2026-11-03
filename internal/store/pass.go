@@ -151,7 +151,12 @@ func (p *Pass) environ() []string {
 // stdin と stdout は（シークレットを含みうるので）どこにも出さない。stderr は
 // キャプチャし、失敗したときだけ warn でログに出す。返すエラーに stderr は入れない。
 func (p *Pass) run(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, p.cfg.Pass, args...)
+	return p.exec(ctx, p.cfg.Pass, stdin, args...)
+}
+
+// exec は prog（pass、gpg、gpg-connect-agent）を run と同じ環境と同じログの扱いで呼ぶ。
+func (p *Pass) exec(ctx context.Context, prog string, stdin []byte, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, prog, args...)
 	cmd.Env = p.environ()
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
@@ -160,12 +165,139 @@ func (p *Pass) run(ctx context.Context, stdin []byte, args ...string) ([]byte, e
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
+	// ログのメッセージはコマンド名（"pass"、"pass failed"、"gpg failed" など）。
+	name := filepath.Base(prog)
 	start := time.Now()
 	err := cmd.Run()
-	p.logger.DebugContext(ctx, "pass", "args", args, "duration", time.Since(start))
+	p.logger.DebugContext(ctx, name, "args", args, "duration", time.Since(start))
 	if err != nil {
-		p.logger.WarnContext(ctx, "pass failed", "args", args, "err", err, "stderr", stderr.String())
-		return nil, fmt.Errorf("pass %s: %w", strings.Join(args, " "), err)
+		p.logger.WarnContext(ctx, name+" failed", "args", args, "err", err, "stderr", stderr.String())
+		return nil, fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
 	}
 	return stdout.Bytes(), nil
+}
+
+// Show は pass show でエントリを復号し、平文を返す。復号に失敗したら、エントリが
+// 消えていれば ErrNotFound、エントリの宛先の鍵が gpg-agent にキャッシュされていなければ
+// ErrLocked、それ以外はそのほかの失敗を返す（stderr の文言は見ない）。
+func (p *Pass) Show(ctx context.Context, name string) ([]byte, error) {
+	if ok, err := p.Exists(ctx, name); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, fmt.Errorf("show %s: %w", name, ErrNotFound)
+	}
+	out, err := p.run(ctx, nil, "show", "--", name)
+	if err == nil {
+		return out, nil
+	}
+	if ok, _ := p.Exists(ctx, name); !ok {
+		return nil, fmt.Errorf("show %s: %w", name, ErrNotFound)
+	}
+	if locked, lerr := p.locked(ctx, path.Dir(name)); lerr == nil && locked {
+		return nil, fmt.Errorf("show %s: %w", name, ErrLocked)
+	} else if lerr != nil {
+		p.logger.WarnContext(ctx, "cannot get lock status", "err", lerr)
+	}
+	return nil, err
+}
+
+// Locked はストアのルートの .gpg-id の鍵が、どれも gpg-agent にキャッシュされて
+// いない（ロック中）かを返す。
+func (p *Pass) Locked(ctx context.Context) (bool, error) {
+	return p.locked(ctx, ".")
+}
+
+// locked は、ストアの中のディレクトリ dir（"." はルート）に効く .gpg-id の鍵について、
+// 暗号化用の秘密鍵の keygrip を gpg-agent の KEYINFO に問い合わせ、どれも cached で
+// なければ true を返す。.gpg-id が読めなければ、すべての秘密鍵を見る。
+func (p *Pass) locked(ctx context.Context, dir string) (bool, error) {
+	grips, err := p.keygrips(ctx, p.recipients(dir))
+	if err != nil {
+		return false, err
+	}
+	if len(grips) == 0 {
+		return false, errors.New("no secret key for the store")
+	}
+	args := make([]string, 0, len(grips)+1)
+	for _, g := range grips {
+		args = append(args, "KEYINFO "+g)
+	}
+	out, err := p.exec(ctx, p.tool("gpg-connect-agent"), nil, append(args, "/bye")...)
+	if err != nil {
+		return false, err
+	}
+	// "S KEYINFO <keygrip> <type> <serialno> <idstr> <cached> ..."。cached は "1" か "-"。
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Fields(line)
+		if len(f) > 6 && f[0] == "S" && f[1] == "KEYINFO" && f[6] == "1" {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// recipients は dir に効く .gpg-id（dir から上にたどって最初に見つかるもの）の鍵を返す。
+// pass と同じく、"#" より後ろと空行は無視する。見つからなければ nil。
+func (p *Pass) recipients(dir string) []string {
+	for {
+		b, err := os.ReadFile(filepath.Join(p.cfg.Dir, filepath.FromSlash(dir), ".gpg-id"))
+		if err == nil {
+			var ids []string
+			for _, line := range strings.Split(string(b), "\n") {
+				line, _, _ = strings.Cut(line, "#")
+				if line = strings.TrimSpace(line); line != "" {
+					ids = append(ids, line)
+				}
+			}
+			return ids
+		}
+		if dir == "." || dir == "/" || dir == "" {
+			return nil
+		}
+		dir = path.Dir(dir)
+	}
+}
+
+// keygrips は ids（空ならすべて）の秘密鍵のうち、暗号化に使う鍵（主鍵と副鍵）の
+// keygrip を返す。
+func (p *Pass) keygrips(ctx context.Context, ids []string) ([]string, error) {
+	args := append([]string{"--batch", "--with-colons", "--with-keygrip", "--list-secret-keys", "--"}, ids...)
+	out, err := p.exec(ctx, p.tool("gpg"), nil, args...)
+	if err != nil {
+		return nil, err
+	}
+	var grips []string
+	encrypt := false
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Split(line, ":")
+		switch {
+		case len(f) > 11 && (f[0] == "sec" || f[0] == "ssb"):
+			encrypt = strings.Contains(f[11], "e")
+		case len(f) > 9 && f[0] == "grp":
+			if encrypt {
+				grips = append(grips, f[9])
+			}
+			encrypt = false
+		}
+	}
+	return grips, nil
+}
+
+// tool は gpg などの補助コマンドを、Env の PATH から探す。見つからなければ名前を
+// そのまま返す（プロセスの PATH で探される）。
+func (p *Pass) tool(name string) string {
+	for i := len(p.cfg.Env) - 1; i >= 0; i-- {
+		k, v, _ := strings.Cut(p.cfg.Env[i], "=")
+		if k != "PATH" {
+			continue
+		}
+		for _, dir := range filepath.SplitList(v) {
+			file := filepath.Join(dir, name)
+			if fi, err := os.Stat(file); dir != "" && err == nil && fi.Mode().IsRegular() && fi.Mode()&0o111 != 0 {
+				return file
+			}
+		}
+		break
+	}
+	return name
 }

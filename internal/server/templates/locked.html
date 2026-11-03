@@ -1,0 +1,15 @@
+<section class="locked" data-entry="{{.Name}}"
+         hx-get="{{.RetryURL}}"
+         hx-trigger="focus from:window"
+         hx-target="#right-pane"
+         hx-swap="innerHTML">
+<h2>{{.Name}}</h2>
+<p class="error" role="alert">{{.Message}}</p>
+<p>ゲストのターミナルで次を実行してパスフレーズを入れ、ブラウザに戻ってください。</p>
+<pre><code id="unlock-command">{{.UnlockCommand}}</code></pre>
+<p class="actions">
+<button type="button" data-copy="#unlock-command">コピー</button>
+<button type="button" hx-get="{{.RetryURL}}" hx-target="#right-pane" hx-swap="innerHTML">再試行</button>
+</p>
+</section>
+{{template "lock-badge" .Badge}}
