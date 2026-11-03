@@ -19,7 +19,7 @@ import (
 // ErrIsDirectory、ErrConflict のどれかと比べ、どれでもなければ「そのほかの失敗」とする。
 // そのほかの失敗のエラー文には内部の情報が入りうるので、ブラウザには出さない。
 //
-// 以降のチケットで、閲覧、追加、生成、削除、移動、ロック状態の取得、明示ロックを足す。
+// 以降のチケットで、追加、生成、削除、移動、明示ロックを足す。
 type Backend interface {
 	// Entries はストアのエントリを名前順で返す。ストアのディレクトリを走査し、
 	// *.gpg のファイル名だけを使う（復号しない。ロック中でも使える）。
@@ -28,6 +28,13 @@ type Backend interface {
 	Exists(ctx context.Context, name string) (bool, error)
 	// Hash はエントリの暗号文の SHA-256 を 16 進で返す。なければ ErrNotFound。
 	Hash(ctx context.Context, name string) (string, error)
+	// Show はエントリを復号して平文を返す（pass show）。平文はシークレットなので、
+	// 呼び出し側はログやエラーに入れないこと。エントリがなければ ErrNotFound、
+	// 復号に失敗してロック中（Locked が true）なら ErrLocked を返す。
+	Show(ctx context.Context, name string) ([]byte, error)
+	// Locked はロック中か（ストアの鍵の解錠のキャッシュが gpg-agent にないか）を返す。
+	// gpg の文言ではなく、gpg-agent の KEYINFO の cached フラグで判定する。
+	Locked(ctx context.Context) (bool, error)
 	// Create は新しいエントリ name を content で作る（pass insert -m -f）。暗号化だけなので
 	// ロック中でも作れる。content の末尾に改行がなければ足す（端末の pass insert -m と揃える）。
 	// 名前が正しくなければ ErrInvalidName、末尾が "/" か同名のディレクトリがあれば

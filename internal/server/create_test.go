@@ -64,8 +64,9 @@ func TestCreateEntryReloadsTreeAndShowsCreatedEntry(t *testing.T) {
 	if !strings.Contains(body, `data-entry="email/work"`) {
 		t.Errorf("created entry is not shown:\n%s", body)
 	}
-	if strings.Contains(body, "CANARYpassword") {
-		t.Errorf("plaintext is shown after create:\n%s", body)
+	// 作ったエントリは詳細（#29）で出す。1 行目は伏せ字の初期状態。
+	if !strings.Contains(body, `type="password" value="CANARYpassword`) {
+		t.Errorf("password is not masked after create:\n%s", body)
 	}
 	// ツリーはこのイベントで読み直す。
 	if top := readBody(t, srv.Get("/")); !strings.Contains(top, "tree-changed from:body") {

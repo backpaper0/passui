@@ -19,7 +19,9 @@ var templateFS embed.FS
 //go:embed static
 var staticFS embed.FS
 
-var templates = template.Must(template.ParseFS(templateFS, "templates/*.html"))
+var templates = template.Must(template.New("").Funcs(template.FuncMap{
+	"entryURL": entryURL,
+}).ParseFS(templateFS, "templates/*.html"))
 
 // Config は Handler の設定である。
 type Config struct {
@@ -57,18 +59,21 @@ func (s *handler) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /login", s.login)
 	mux.HandleFunc("POST /logout", s.logout)
 	mux.HandleFunc("GET /tree", s.tree)
+	mux.HandleFunc("GET /entry/{name...}", s.entry)
+	mux.HandleFunc("GET /lock-status", s.lockStatus)
 	mux.HandleFunc("GET /new", s.newEntryForm)
 	mux.HandleFunc("POST /new", s.createEntry)
 }
 
 type indexData struct {
-	Tree treeData
+	Tree  treeData
+	Badge badgeData
 }
 
 func (s *handler) top(w http.ResponseWriter, r *http.Request) {
 	// ツリーの取得に失敗しても、画面の枠は出す（左ペインにエラー ID が出る）。
 	tree, _ := s.loadTree(r)
-	s.render(w, r, http.StatusOK, "index.html", indexData{Tree: tree})
+	s.render(w, r, http.StatusOK, "index.html", indexData{Tree: tree, Badge: s.loadBadge(r)})
 }
 
 // render はテンプレートを status で描画する。途中で失敗したら応答は差し替えられないので、

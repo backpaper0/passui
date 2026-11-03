@@ -38,11 +38,6 @@ type newEntryData struct {
 	Failure string
 }
 
-// createdData は created.html（作ったエントリ）に渡す。
-type createdData struct {
-	Path string
-}
-
 // newEntryForm は GET /new。新規作成フォームを右ペインに返す。クエリの selected は
 // 選んでいるエントリ（#selected-entry の値）で、既定のフォルダはそのフォルダにする。
 func (s *handler) newEntryForm(w http.ResponseWriter, r *http.Request) {
@@ -93,6 +88,6 @@ func (s *handler) createEntry(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logOperation(r, "create", data.Path)
 	triggerTreeReload(w)
-	// TODO(#29): 詳細表示ができたら、作ったエントリの詳細に差し替える。
-	s.render(w, r, http.StatusOK, "created.html", createdData{Path: data.Path})
+	// 作ったエントリの詳細を出す（ロック中なら、作成できたことと解錠の案内を 200 で出す）。
+	s.showEntry(w, r, data.Path, "エントリを作成しました。")
 }

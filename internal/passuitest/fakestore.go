@@ -14,11 +14,13 @@ import (
 )
 
 // FakeStore は HTTP 層のテストに使うストア バックエンド。エントリの名前と
-// 「暗号文」（ただの文字列）をメモリに持つ。並行に使ってよい。
+// 「暗号文」（ただの文字列）をメモリに持つ。Show は暗号文の文字列をそのまま平文として
+// 返す（Put に渡した文字列がエントリの中身になる）。並行に使ってよい。
 type FakeStore struct {
 	mu      sync.Mutex
 	entries map[string]string
 	err     error
+	locked  bool
 }
 
 var _ store.Backend = (*FakeStore)(nil)
@@ -52,6 +54,14 @@ func (f *FakeStore) SetErr(err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.err = err
+}
+
+// SetLocked でロック状態を切り替える（既定は解錠中）。ロック中は Show が
+// store.ErrLocked を返し、Locked が true を返す。
+func (f *FakeStore) SetLocked(locked bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.locked = locked
 }
 
 func (f *FakeStore) Entries(ctx context.Context) ([]string, error) {
@@ -90,6 +100,31 @@ func (f *FakeStore) Hash(ctx context.Context, name string) (string, error) {
 	}
 	sum := sha256.Sum256([]byte(c))
 	return hex.EncodeToString(sum[:]), nil
+}
+
+func (f *FakeStore) Show(ctx context.Context, name string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return nil, f.err
+	}
+	c, ok := f.entries[name]
+	if !ok {
+		return nil, fmt.Errorf("show %s: %w", name, store.ErrNotFound)
+	}
+	if f.locked {
+		return nil, fmt.Errorf("show %s: %w", name, store.ErrLocked)
+	}
+	return []byte(c), nil
+}
+
+func (f *FakeStore) Locked(ctx context.Context) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.locked, nil
 }
 
 // Create は store.Pass.Create と同じ確認をしてからエントリを置く。「暗号文」は
