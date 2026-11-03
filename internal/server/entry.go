@@ -61,6 +61,8 @@ func parseEntry(plain []byte) entryContent {
 // entryData は entry.html（右ペインの詳細）に渡す。
 type entryData struct {
 	Name string
+	// Notice が空でなければ、詳細の上に出す（「エントリを作成しました」など）。
+	Notice string
 	entryContent
 	// Badge は、ヘッダーのバッジを差し替える（hx-swap-oob）ためのロック状態。
 	Badge badgeData
@@ -69,29 +71,40 @@ type entryData struct {
 // entry は GET /entry/{name...}。エントリを 1 回だけ復号し、右ペインの詳細を返す。
 // ロック中なら中身を返さず、解錠の案内を 423 で返す。
 func (s *handler) entry(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
+	s.showEntry(w, r, r.PathValue("name"), "")
+}
+
+// showEntry はエントリを 1 回だけ復号して詳細を右ペインに返す（閲覧の操作ログも出す）。
+// 書き込みの後に結果として詳細を出すときは notice に結果の文言を渡す。そのときは
+// 書き込み自体は成功しているので、ロック中でも案内を 200 で返す。
+func (s *handler) showEntry(w http.ResponseWriter, r *http.Request, name, notice string) {
 	plain, err := s.cfg.Store.Show(r.Context(), name)
 	if err != nil {
-		s.entryFailure(w, r, name, entryURL(name), err, "show entry")
+		s.entryFailure(w, r, name, entryURL(name), notice, err, "show entry")
 		return
 	}
 	s.logOperation(r, "show", name)
 	s.render(w, r, http.StatusOK, "entry.html", entryData{
 		Name:         name,
+		Notice:       notice,
 		entryContent: parseEntry(plain),
 		Badge:        badgeData{State: badgeUnlocked, OOB: true},
 	})
 }
 
 // entryFailure は、エントリを復号する操作（閲覧、編集を開く、再生成）の失敗を右ペインに返す。
-// ロック中なら解錠の案内（lockedData）を 423 で返す。retryURL は案内の再試行と、
-// フォーカスが戻ったときの確認で GET する URL（閲覧なら entryURL(name)）。
+// ロック中なら解錠の案内（lockedData）を 423 で返す（notice があれば 200）。retryURL は
+// 案内の再試行と、フォーカスが戻ったときの確認で GET する URL（閲覧なら entryURL(name)）。
 // それ以外は storeFailure で分類したメッセージだけを返す（stderr は出さない）。
-func (s *handler) entryFailure(w http.ResponseWriter, r *http.Request, name, retryURL string, err error, op string) {
+func (s *handler) entryFailure(w http.ResponseWriter, r *http.Request, name, retryURL, notice string, err error, op string) {
 	if errors.Is(err, store.ErrLocked) {
 		status, msg := s.storeFailure(r, err, op)
+		if notice != "" {
+			status = http.StatusOK
+		}
 		s.render(w, r, status, "locked.html", lockedData{
 			Name:     name,
+			Notice:   notice,
 			RetryURL: retryURL,
 			Message:  msg,
 			Badge:    badgeData{State: badgeLocked, OOB: true},
@@ -104,7 +117,8 @@ func (s *handler) entryFailure(w http.ResponseWriter, r *http.Request, name, ret
 
 // lockedData は locked.html（ロック中の案内）に渡す。
 type lockedData struct {
-	Name string
+	Name   string
+	Notice string
 	// RetryURL は再試行とフォーカスが戻ったときに GET する URL。
 	RetryURL string
 	Message  string
@@ -130,10 +144,4 @@ func shellQuote(s string) string {
 		return s
 	}
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
-// logOperation は閲覧と書き込みの操作種別（op）とエントリのパスを info でログに出す。
-// 書き込みのチケットも同じ形で使う。
-func (s *handler) logOperation(r *http.Request, op, name string) {
-	s.logger.InfoContext(r.Context(), "operation", "op", op, "entry", name)
 }

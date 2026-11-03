@@ -1,0 +1,13 @@
+<form class="entry-form" hx-post="/new" hx-target="#right-pane" hx-swap="innerHTML">
+<h2>新規エントリ</h2>
+{{if .Failure}}<p class="error" role="alert">{{.Failure}}</p>
+{{end -}}
+<input type="hidden" id="selected-entry" name="selected" value="{{.Selected}}">
+<label for="new-path">パス</label>
+<input id="new-path" name="path" value="{{.Path}}" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="email/work">
+<label for="new-content">本文</label>
+<textarea id="new-content" name="content" rows="8" required autocomplete="off" autocapitalize="off" spellcheck="false">
+{{.Content}}</textarea>
+<p class="hint">1 行目がパスワードです。2 行目以降に <code>key: value</code> を書けます。</p>
+<button type="submit">作成</button>
+</form>

@@ -49,6 +49,64 @@ func TestOpenEntryShowsMaskedPasswordAndFields(t *testing.T) {
 	}
 }
 
+func TestDetailMarksSelectedEntryForNewEntryForm(t *testing.T) {
+	fake := passuitest.NewFakeStore("email/work")
+	srv := passuitest.New(t).Serve(passuitest.Options{Store: fake})
+
+	_, body := openEntry(t, srv, "email/work")
+	if !strings.Contains(body, `id="selected-entry" name="selected" value="email/work"`) {
+		t.Errorf("detail has no selected entry:\n%s", body)
+	}
+	fake.SetLocked(true)
+	_, body = openEntry(t, srv, "email/work")
+	if !strings.Contains(body, `id="selected-entry" name="selected" value="email/work"`) {
+		t.Errorf("locked guidance has no selected entry:\n%s", body)
+	}
+}
+
+func TestCreatedEntryIsShownAsDetail(t *testing.T) {
+	h := passuitest.New(t)
+	password := h.Canary("password")
+	fake := passuitest.NewFakeStore()
+	srv := h.Serve(passuitest.Options{Store: fake})
+
+	res := postCreate(srv, "email/work", password+"\nuser: alice")
+	body := readBody(t, res)
+
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200:\n%s", res.StatusCode, body)
+	}
+	for _, want := range []string{"エントリを作成しました", `type="password" value="` + password + `"`, "<dt>user</dt><dd>alice</dd>"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body does not contain %s:\n%s", want, body)
+		}
+	}
+}
+
+func TestCreatedEntryWhileLockedShowsGuidanceWithOK(t *testing.T) {
+	h := passuitest.New(t)
+	password := h.Canary("password")
+	fake := passuitest.NewFakeStore()
+	fake.SetLocked(true)
+	srv := h.Serve(passuitest.Options{Store: fake})
+
+	res := postCreate(srv, "bank", password)
+	body := readBody(t, res)
+
+	// 作成は成功しているので 200。中身は出さず、解錠の案内を出す。
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", res.StatusCode)
+	}
+	for _, want := range []string{"エントリを作成しました", "pass show bank &gt;/dev/null"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body does not contain %s:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, password) {
+		t.Errorf("locked response contains the entry:\n%s", body)
+	}
+}
+
 func TestTreeEntryOpensDetailInRightPane(t *testing.T) {
 	srv := passuitest.New(t).Serve(passuitest.Options{Store: passuitest.NewFakeStore("email/my work")})
 
@@ -56,6 +114,16 @@ func TestTreeEntryOpensDetailInRightPane(t *testing.T) {
 
 	if !strings.Contains(body, `hx-get="/entry/email/my%20work"`) || !strings.Contains(body, `hx-target="#right-pane"`) {
 		t.Errorf("tree entry does not open the detail:\n%s", body)
+	}
+}
+
+func TestSearchResultOpensDetailInRightPane(t *testing.T) {
+	srv := passuitest.New(t).Serve(passuitest.Options{Store: passuitest.NewFakeStore("email/work", "bank")})
+
+	body := readBody(t, srv.Get("/tree?q=work"))
+
+	if !strings.Contains(body, `hx-get="/entry/email/work"`) || !strings.Contains(body, `hx-target="#right-pane"`) {
+		t.Errorf("search result does not open the detail:\n%s", body)
 	}
 }
 

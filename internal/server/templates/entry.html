@@ -1,4 +1,8 @@
 <article class="entry-detail" data-entry="{{.Name}}">
+<input type="hidden" id="selected-entry" name="selected" value="{{.Name}}">
+{{- if .Notice}}
+<p class="notice" role="status">{{.Notice}}</p>
+{{- end}}
 <h2>{{.Name}}</h2>
 <div class="password-row">
 <label for="entry-password">パスワード</label>

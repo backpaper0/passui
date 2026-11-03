@@ -25,10 +25,12 @@
        hx-trigger="input changed delay:200ms, search"
        hx-target="#tree"
        hx-swap="innerHTML">
+<!-- 既定のフォルダは、右ペインの #selected-entry（選んでいるエントリ）から決まる。 -->
+<button type="button" class="new-entry" hx-get="/new" hx-target="#right-pane" hx-swap="innerHTML" hx-include="#selected-entry">＋ 新規エントリ</button>
 <div id="tree"
      hx-include="#search"
      hx-get="/tree"
-     hx-trigger="visibilitychange[document.visibilityState === 'visible'] from:document"
+     hx-trigger="visibilitychange[document.visibilityState === 'visible'] from:document, tree-changed from:body"
      hx-swap="innerHTML">
 {{template "tree.html" .Tree}}
 </div>

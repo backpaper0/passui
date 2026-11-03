@@ -61,6 +61,8 @@ func (s *handler) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /tree", s.tree)
 	mux.HandleFunc("GET /entry/{name...}", s.entry)
 	mux.HandleFunc("GET /lock-status", s.lockStatus)
+	mux.HandleFunc("GET /new", s.newEntryForm)
+	mux.HandleFunc("POST /new", s.createEntry)
 }
 
 type indexData struct {

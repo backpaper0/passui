@@ -6,6 +6,10 @@ package store
 import (
 	"context"
 	"errors"
+	"path"
+	"strings"
+
+	"github.com/backpaper0/passui/internal/secret"
 )
 
 // Backend はストア バックエンドのインターフェース。エントリはストアからの相対パスで
@@ -31,6 +35,11 @@ type Backend interface {
 	// Locked はロック中か（ストアの鍵の解錠のキャッシュが gpg-agent にないか）を返す。
 	// gpg の文言ではなく、gpg-agent の KEYINFO の cached フラグで判定する。
 	Locked(ctx context.Context) (bool, error)
+	// Create は新しいエントリ name を content で作る（pass insert -m -f）。暗号化だけなので
+	// ロック中でも作れる。content の末尾に改行がなければ足す（端末の pass insert -m と揃える）。
+	// 名前が正しくなければ ErrInvalidName、末尾が "/" か同名のディレクトリがあれば
+	// ErrIsDirectory、同じ名前のエントリがあれば ErrExists を返し、ストアを変えない。
+	Create(ctx context.Context, name string, content secret.Value) error
 }
 
 // 分類したエラー。Backend の実装はこれらを（必要なら %w で包んで）返す。
@@ -45,4 +54,35 @@ var (
 	ErrIsDirectory = errors.New("destination is a directory")
 	// ErrConflict は編集中にエントリが外で変えられた（ハッシュが違う、または消えた）。
 	ErrConflict = errors.New("entry was changed")
+	// ErrInvalidName は新しいエントリの名前（パス）として使えない。
+	ErrInvalidName = errors.New("invalid entry name")
 )
+
+// CheckNewName は、新しく作るエントリ（作成・生成・移動の宛先）の名前の形を確かめる。
+// ストアは見ない（既存のエントリやディレクトリとの衝突は各実装が確かめる）。
+//   - 末尾が "/" なら ErrIsDirectory（pass はディレクトリの下に作ってしまうため）。
+//   - 空、絶対パス、"a//b" のような正規形でない名前、"." で始まる要素（".." や
+//     ".git"、".gpg-id" のように一覧に出ない名前）を含む名前は ErrInvalidName。
+func CheckNewName(name string) error {
+	if strings.HasSuffix(name, "/") {
+		return ErrIsDirectory
+	}
+	if name == "" || path.Clean(name) != name || strings.HasPrefix(name, "/") {
+		return ErrInvalidName
+	}
+	for _, part := range strings.Split(name, "/") {
+		if strings.HasPrefix(part, ".") || strings.ContainsRune(part, 0) {
+			return ErrInvalidName
+		}
+	}
+	return nil
+}
+
+// WithTrailingNewline は本文の末尾に改行がなければ足す。Create に渡した本文が
+// ストアにどう書かれるかを表す（フェイクの実装も本物と揃えるために使う）。
+func WithTrailingNewline(content string) string {
+	if content == "" || strings.HasSuffix(content, "\n") {
+		return content
+	}
+	return content + "\n"
+}
