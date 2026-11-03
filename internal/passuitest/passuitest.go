@@ -12,11 +12,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/backpaper0/passui/internal/secret"
 	"github.com/backpaper0/passui/internal/server"
 )
 
@@ -87,15 +89,31 @@ func (h *Harness) checkCanaries() {
 type Options struct {
 	// Port は Handler の設定のポート。0 なら DefaultPort。
 	Port int
+	// Token はログイン トークン。空ならカナリアを作って使う。
+	// ここに渡した値もカナリアとして登録する。
+	Token string
+	// Anonymous が true なら、ログインしないまま返す。
+	// false（既定）なら Serve の中でログインし、以降の Do にセッション Cookie を付ける。
+	Anonymous bool
 }
 
-// Serve は server.New で Handler を組み立てる。
+// Serve は server.New で Handler を組み立てる。既定ではログインまで済ませる。
 func (h *Harness) Serve(opts Options) *Server {
 	if opts.Port == 0 {
 		opts.Port = DefaultPort
 	}
-	cfg := server.Config{Port: opts.Port}
-	return h.newServer(opts.Port, server.New(cfg, h.Logger))
+	if opts.Token == "" {
+		opts.Token = h.Canary("token")
+	} else {
+		h.AddCanary(opts.Token)
+	}
+	cfg := server.Config{Port: opts.Port, Token: secret.Of(opts.Token)}
+	s := h.newServer(opts.Port, server.New(cfg, h.Logger))
+	s.Token = opts.Token
+	if !opts.Anonymous {
+		s.SessionCookie = s.Login()
+	}
+	return s
 }
 
 // Wrap は next に共通のミドルウェアだけを掛ける。ミドルウェア自体のテスト
@@ -115,6 +133,29 @@ type Server struct {
 	Handler http.Handler
 	// Host は NewRequest が既定で付ける Host ヘッダ。
 	Host string
+	// Token は Handler のログイン トークン（Wrap では空）。
+	Token string
+	// SessionCookie は Serve でログインしたときのセッション Cookie（Anonymous なら nil）。
+	// Do は、リクエストにセッション Cookie がなければこれを付ける。
+	SessionCookie *http.Cookie
+}
+
+// SessionCookieName は passui のセッション Cookie の名前。
+const SessionCookieName = "passui_session"
+
+// Login は Token で新しくログインし、発行されたセッション Cookie を返す。
+// Cookie の値はカナリアとして登録する。SessionCookie は変えない。
+func (s *Server) Login() *http.Cookie {
+	s.t.Helper()
+	res := s.Do(s.NewRequest(http.MethodGet, "/login?token="+url.QueryEscape(s.Token), ""))
+	for _, c := range res.Cookies() {
+		if c.Name == SessionCookieName && c.Value != "" {
+			s.AddCanary(c.Value)
+			return c
+		}
+	}
+	s.t.Fatalf("login failed: status %d", res.StatusCode)
+	return nil
 }
 
 // NewRequest は Host ヘッダを Server.Host にしたリクエストを作る。
@@ -131,6 +172,11 @@ func (s *Server) NewRequest(method, target string, body string) *http.Request {
 
 // Do はリクエストを Handler に通し、レスポンスを返す。
 func (s *Server) Do(r *http.Request) *http.Response {
+	if s.SessionCookie != nil {
+		if _, err := r.Cookie(SessionCookieName); err != nil {
+			r.AddCookie(s.SessionCookie)
+		}
+	}
 	rec := httptest.NewRecorder()
 	s.Handler.ServeHTTP(rec, r)
 	return rec.Result()
