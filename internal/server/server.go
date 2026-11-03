@@ -51,7 +51,7 @@ type handler struct {
 	sessions *sessions
 }
 
-// routes にルートを登録する。以降のチケットはここに足す。
+// routes にルートを登録する。
 func (s *handler) routes(mux *http.ServeMux) {
 	static, err := fs.Sub(staticFS, "static")
 	if err != nil {

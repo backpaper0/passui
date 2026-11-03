@@ -2,17 +2,20 @@ package server
 
 import "net/http"
 
-// ロック状態のバッジの状態。
+// badgeState はロック状態のバッジの状態。値は CSS のクラス（badge-<状態>）に使う。
+// ゼロ値（空）はバッジを出さないことを表す。
+type badgeState string
+
 const (
-	badgeUnlocked = "unlocked"
-	badgeLocked   = "locked"
+	badgeUnlocked badgeState = "unlocked"
+	badgeLocked   badgeState = "locked"
 	// badgeUnknown はロック状態を取得できなかった。
-	badgeUnknown = "unknown"
+	badgeUnknown badgeState = "unknown"
 )
 
 // badgeData は lock-badge（ヘッダーのロック状態のバッジ）に渡す。
 type badgeData struct {
-	State string
+	State badgeState
 	// OOB が true なら hx-swap-oob を付ける。右ペインの応答に添えて、
 	// ヘッダーのバッジを一緒に差し替えるのに使う。
 	OOB bool
@@ -73,7 +76,7 @@ func (s *handler) lock(w http.ResponseWriter, r *http.Request) {
 }
 
 // lockStatus は GET /lock-status。ヘッダーのバッジだけを返す（htmx で差し替える）。
-// ロックの操作（#31）の後は、応答に HX-Trigger: lock-changed を付ければバッジが読み直される。
+// 応答に HX-Trigger: lock-changed を付けると、バッジがここから読み直される（lock）。
 func (s *handler) lockStatus(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, http.StatusOK, "lock-badge", s.loadBadge(r))
 }
