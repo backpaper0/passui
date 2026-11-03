@@ -46,6 +46,9 @@ type Backend interface {
 	// Update は既存のエントリ e.Name の本文を書き換える（pass insert -m -f）。暗号化だけなので
 	// ロック中でも書ける。今の暗号文のハッシュが e.Hash と違えば ErrConflict、エントリが
 	// 消えていれば ErrConflict と ErrNotFound の両方を返し、ストアを変えない（作り直さない）。
+	// e.NewName が e.Name と違えば、e.Name に保存した後に e.NewName へ移動する（pass mv -f）。
+	// 移動先は Create と同じ規則で確かめ（ErrInvalidName、ErrIsDirectory、ErrExists）、
+	// だめならストアを変えない。mv だけが失敗したら ErrMoveFailed（本文は e.Name に保存済み）。
 	Update(ctx context.Context, e Edit) error
 	// Delete はエントリ name を消す（pass rm -f）。復号しないのでロック中でも消せる。
 	// エントリがなければ ErrNotFound を返す。
@@ -66,6 +69,9 @@ var (
 	ErrConflict = errors.New("entry was changed")
 	// ErrInvalidName は新しいエントリの名前（パス）として使えない。
 	ErrInvalidName = errors.New("invalid entry name")
+	// ErrMoveFailed は、編集の保存でパスを変えたとき、本文は元のパスに保存できたが
+	// 移動（pass mv）だけが失敗した。原因のエラーも一緒に包む（ブラウザには出さない）。
+	ErrMoveFailed = errors.New("content saved but move failed")
 )
 
 // CheckNewName は、新しく作るエントリ（作成・生成・移動の宛先）の名前の形を確かめる。
