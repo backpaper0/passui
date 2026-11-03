@@ -171,6 +171,20 @@ func TestPassIsCalledWithStoreEnvironment(t *testing.T) {
 	}
 }
 
+func TestPassKeepsUserGPGOptionsAndAppendsBatch(t *testing.T) {
+	p, cfg, _ := newFakePass(t, "PASSWORD_STORE_GPG_OPTS=--trust-model always")
+
+	if err := p.Create(context.Background(), "new", secret.Of("x")); err != nil {
+		t.Fatal(err)
+	}
+
+	// gpg は後のオプションを優先するので、passui の --pinentry-mode error が効く。
+	want := "--trust-model always --batch --pinentry-mode error"
+	if got := passEnv(t, cfg)["PASSWORD_STORE_GPG_OPTS"]; got != want {
+		t.Errorf("PASSWORD_STORE_GPG_OPTS = %q, want %q", got, want)
+	}
+}
+
 func TestPassLogsStderrOnlyOnFailureAndNeverStdinOrStdout(t *testing.T) {
 	p, _, logs := newFakePass(t)
 	ctx := context.Background()

@@ -29,8 +29,8 @@ type PassConfig struct {
 	GnupgHome string
 	// Env は子プロセスに渡す環境（"KEY=VALUE"）の土台。PATH や HOME、
 	// PASSWORD_STORE_GENERATED_LENGTH などはここから引き継ぐ。
-	// PASSWORD_STORE_DIR、GNUPGHOME、PASSWORD_STORE_GPG_OPTS、LC_ALL は
-	// 呼び出しのたびに Pass が上書きする。
+	// PASSWORD_STORE_DIR、GNUPGHOME、LC_ALL は呼び出しのたびに Pass が上書きする。
+	// PASSWORD_STORE_GPG_OPTS は、ここの値の後ろに "--batch --pinentry-mode error" を足す。
 	Env []string
 }
 
@@ -134,19 +134,29 @@ func (p *Pass) entryFile(name string) (string, error) {
 // environ は pass を呼ぶときの環境を組み立てる。呼び出しのたびに作る。
 func (p *Pass) environ() []string {
 	env := make([]string, 0, len(p.cfg.Env)+4)
+	var userOpts string
 	for _, kv := range p.cfg.Env {
-		k, _, _ := strings.Cut(kv, "=")
+		k, v, _ := strings.Cut(kv, "=")
 		switch k {
-		case "PASSWORD_STORE_DIR", "GNUPGHOME", "PASSWORD_STORE_GPG_OPTS", "LC_ALL":
+		case "PASSWORD_STORE_GPG_OPTS":
+			userOpts = v
+			continue
+		case "PASSWORD_STORE_DIR", "GNUPGHOME", "LC_ALL":
 			continue
 		}
 		env = append(env, kv)
 	}
+	// pinentry を出さない。ロック中なら復号は失敗する（判定は KEYINFO で行う）。
+	// ユーザーの PASSWORD_STORE_GPG_OPTS は互換のため残し、後ろに足す（gpg は後に
+	// 書いたオプションを優先するので、--pinentry-mode error が効く）。
+	gpgOpts := "--batch --pinentry-mode error"
+	if userOpts = strings.TrimSpace(userOpts); userOpts != "" {
+		gpgOpts = userOpts + " " + gpgOpts
+	}
 	return append(env,
 		"PASSWORD_STORE_DIR="+p.cfg.Dir,
 		"GNUPGHOME="+p.cfg.GnupgHome,
-		// pinentry を出さない。ロック中なら復号は失敗する（判定は KEYINFO で行う）。
-		"PASSWORD_STORE_GPG_OPTS=--batch --pinentry-mode error",
+		"PASSWORD_STORE_GPG_OPTS="+gpgOpts,
 		"LC_ALL=C",
 	)
 }
