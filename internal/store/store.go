@@ -50,6 +50,12 @@ type Backend interface {
 	// 移動先は Create と同じ規則で確かめ（ErrInvalidName、ErrIsDirectory、ErrExists）、
 	// だめならストアを変えない。mv だけが失敗したら ErrMoveFailed（本文は e.Name に保存済み）。
 	Update(ctx context.Context, e Edit) error
+	// Generate は新しいエントリ name をパスワード 1 行だけで作る（pass generate -f）。
+	// 宛先の確認は Create と同じ。生成したパスワードは返さない（読むなら Show）。
+	Generate(ctx context.Context, name string, opts GenerateOptions) error
+	// Regenerate はエントリ name の 1 行目だけを新しいパスワードに替え、2 行目以降を残す
+	// （pass generate -i）。復号が要るので、ロック中なら ErrLocked、なければ ErrNotFound。
+	Regenerate(ctx context.Context, name string, opts GenerateOptions) error
 	// Delete はエントリ name を消す（pass rm -f）。復号しないのでロック中でも消せる。
 	// エントリがなければ ErrNotFound を返す。
 	Delete(ctx context.Context, name string) error

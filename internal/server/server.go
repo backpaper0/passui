@@ -20,8 +20,9 @@ var templateFS embed.FS
 var staticFS embed.FS
 
 var templates = template.Must(template.New("").Funcs(template.FuncMap{
-	"entryURL": entryURL,
-	"editURL":  editURL,
+	"entryURL":      entryURL,
+	"editURL":       editURL,
+	"regenerateURL": regenerateURL,
 }).ParseFS(templateFS, "templates/*.html"))
 
 // Config は Handler の設定である。
@@ -67,6 +68,7 @@ func (s *handler) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /new", s.createEntry)
 	mux.HandleFunc("GET /edit/{name...}", s.editForm)
 	mux.HandleFunc("POST /edit/{name...}", s.saveEdit)
+	mux.HandleFunc("POST /regenerate/{name...}", s.regenerateEntry)
 	mux.HandleFunc("GET /delete/{name...}", s.confirmDelete)
 	mux.HandleFunc("POST /delete/{name...}", s.deleteEntry)
 }
