@@ -4,7 +4,7 @@
   "use strict";
 
   // 「表示」: data-reveal="<セレクタ>" の input を、伏せ字と平文で切り替える。
-  // 伏せ字に戻す処理（エントリの切り替え、タブの非表示）は #30 で足す。
+  // 伏せ字に戻す処理（エントリの切り替え、タブの非表示）は clipboard.js にある。
   function toggleReveal(button) {
     var input = document.querySelector(button.dataset.reveal);
     if (!input) return;
@@ -16,7 +16,7 @@
 
   // 「コピー」: data-copy="<セレクタ>" の要素の文字列をクリップボードに入れる。
   // シークレットではない文字列（解錠のワンライナーなど）に使う。
-  // パスワードのコピーとクリップボードのクリアは #30 で足す。
+  // パスワードや値のコピー（クリップボードのクリア付き）は clipboard.js の data-copy-secret。
   function copyText(button) {
     var el = document.querySelector(button.dataset.copy);
     if (!el || !navigator.clipboard) return;
