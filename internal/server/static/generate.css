@@ -1,0 +1,10 @@
+/* パスワード生成（#33）。新規作成フォームは選んだ作り方の欄だけを出す。 */
+.new-mode { display: flex; gap: 1rem; border: none; padding: 0; margin: 0; }
+.new-mode legend { padding: 0; margin-bottom: 0.25rem; }
+.new-mode label, .generate-fields .checkbox { display: inline-flex; align-items: center; gap: 0.25rem; }
+.entry-form .new-mode input, .generate-fields .checkbox input { width: auto; }
+.generate-fields, .manual-fields { display: grid; gap: 0.5rem; }
+.generate-fields input[type="number"] { max-width: 10rem; }
+.entry-form:has(input[name="mode"][value="generate"]:checked) .manual-fields { display: none; }
+.entry-form:not(:has(input[name="mode"][value="generate"]:checked)) .generate-fields { display: none; }
+.regenerate { margin: 1rem 0 0; }

@@ -1,0 +1,24 @@
+{{/* パスワード生成（#33）の部品。new.html と entry.html から呼ぶ。 */}}
+{{define "new-mode"}}
+<fieldset class="new-mode">
+<legend>作り方</legend>
+<label><input type="radio" name="mode" value="manual"{{if not .Generate}} checked{{end}}> 手で入力する</label>
+<label><input type="radio" name="mode" value="generate"{{if .Generate}} checked{{end}}> 生成する</label>
+</fieldset>
+{{end}}
+
+{{define "generate-fields"}}
+<div class="generate-fields">
+<label for="new-length">長さ</label>
+<input id="new-length" name="length" type="number" min="1" max="1024" value="{{.Length}}" placeholder="pass の既定" inputmode="numeric">
+<label class="checkbox"><input type="checkbox" name="no-symbols"{{if .NoSymbols}} checked{{end}}> 記号なし</label>
+<p class="hint">パスワード 1 行だけのエントリを作ります。ほかの行は後から編集で足せます。長さが空なら pass の既定（<code>PASSWORD_STORE_GENERATED_LENGTH</code>、なければ 25）です。</p>
+</div>
+{{end}}
+
+{{define "regenerate-button"}}
+<p class="regenerate">
+<button type="button" hx-post="{{regenerateURL .}}" hx-target="#right-pane" hx-swap="innerHTML"
+        hx-confirm="{{.}} のパスワード（1 行目）を生成し直します。よろしいですか？">パスワードを再生成</button>
+</p>
+{{end}}

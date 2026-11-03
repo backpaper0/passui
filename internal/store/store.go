@@ -40,6 +40,12 @@ type Backend interface {
 	// 名前が正しくなければ ErrInvalidName、末尾が "/" か同名のディレクトリがあれば
 	// ErrIsDirectory、同じ名前のエントリがあれば ErrExists を返し、ストアを変えない。
 	Create(ctx context.Context, name string, content secret.Value) error
+	// Generate は新しいエントリ name をパスワード 1 行だけで作る（pass generate -f）。
+	// 宛先の確認は Create と同じ。生成したパスワードは返さない（読むなら Show）。
+	Generate(ctx context.Context, name string, opts GenerateOptions) error
+	// Regenerate はエントリ name の 1 行目だけを新しいパスワードに替え、2 行目以降を残す
+	// （pass generate -i）。復号が要るので、ロック中なら ErrLocked、なければ ErrNotFound。
+	Regenerate(ctx context.Context, name string, opts GenerateOptions) error
 }
 
 // 分類したエラー。Backend の実装はこれらを（必要なら %w で包んで）返す。
