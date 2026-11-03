@@ -136,10 +136,7 @@ func (s *handler) editFailure(w http.ResponseWriter, r *http.Request, data editD
 		return
 	}
 	if !errors.Is(err, store.ErrConflict) {
-		status, msg := s.storeFailure(r, err, "save entry", "entry", data.Name)
-		if errors.Is(err, store.ErrIsDirectory) && strings.HasSuffix(data.Path, "/") {
-			msg = "パスの末尾が / です。エントリの名前まで入力してください"
-		}
+		status, msg := s.destinationFailure(r, err, data.Path, "save entry", "entry", data.Name)
 		data.Failure = msg
 		s.render(w, r, status, "edit.html", data)
 		return

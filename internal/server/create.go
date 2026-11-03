@@ -1,7 +1,6 @@
 package server
 
 import (
-	"errors"
 	"net/http"
 	"path"
 	"strings"
@@ -86,10 +85,7 @@ func (s *handler) createEntry(w http.ResponseWriter, r *http.Request) {
 
 	err := s.cfg.Store.Create(r.Context(), data.Path, secret.Of(data.Content))
 	if err != nil {
-		status, msg := s.storeFailure(r, err, "create entry", "entry", data.Path)
-		if errors.Is(err, store.ErrIsDirectory) && strings.HasSuffix(data.Path, "/") {
-			msg = "パスの末尾が / です。エントリの名前まで入力してください"
-		}
+		status, msg := s.destinationFailure(r, err, data.Path, "create entry", "entry", data.Path)
 		data.Failure = msg
 		s.render(w, r, status, "new.html", data)
 		return

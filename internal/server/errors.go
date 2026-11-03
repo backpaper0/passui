@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/backpaper0/passui/internal/store"
 )
@@ -34,6 +35,17 @@ func (s *handler) storeFailure(r *http.Request, err error, op string, attrs ...a
 	}
 	id := logFailure(r.Context(), s.logger, op, append(attrs, "err", err)...)
 	return http.StatusInternalServerError, failureMessage(id)
+}
+
+// destinationFailure は、新しいエントリの宛先 dest（作成・生成のパス、移動先）を伴う操作の
+// 失敗を storeFailure で分類する。末尾が "/" のパスには、エントリの名前まで入れるよう
+// 案内する（store は同名のフォルダがあるときと同じ ErrIsDirectory を返す）。
+func (s *handler) destinationFailure(r *http.Request, err error, dest, op string, attrs ...any) (int, string) {
+	status, msg := s.storeFailure(r, err, op, attrs...)
+	if errors.Is(err, store.ErrIsDirectory) && strings.HasSuffix(dest, "/") {
+		msg = "パスの末尾が / です。エントリの名前まで入力してください"
+	}
+	return status, msg
 }
 
 // newErrorID はブラウザとログを結び付けるエラー ID（16 桁の 16 進数）を作る。
