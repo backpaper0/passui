@@ -109,7 +109,7 @@ func (s *handler) saveEdit(w http.ResponseWriter, r *http.Request) {
 		s.showEntry(w, r, data.Name, "エントリを保存しました。")
 		return
 	}
-	s.logger.InfoContext(r.Context(), "operation", "op", "move", "entry", data.Name, "to", data.Path)
+	s.logOperation(r, "move", data.Name, "to", data.Path)
 	triggerTreeReload(w)
 	s.showEntry(w, r, data.Path, "エントリを保存し、"+data.Path+" に移動しました。")
 }

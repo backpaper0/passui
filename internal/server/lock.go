@@ -57,7 +57,7 @@ func (s *handler) lock(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			logFailure(r.Context(), s.logger, "lock", "err", err)
 		} else {
-			s.logger.InfoContext(r.Context(), "operation", "op", "lock")
+			s.logOperation(r, "lock", "")
 		}
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
@@ -68,7 +68,7 @@ func (s *handler) lock(w http.ResponseWriter, r *http.Request) {
 		s.render(w, r, status, "failure.html", msg)
 		return
 	}
-	s.logger.InfoContext(r.Context(), "operation", "op", "lock")
+	s.logOperation(r, "lock", "")
 	s.render(w, r, http.StatusOK, "lock_done.html", nil)
 }
 

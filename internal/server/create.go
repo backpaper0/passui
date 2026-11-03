@@ -20,9 +20,14 @@ func triggerTreeReload(w http.ResponseWriter) {
 }
 
 // logOperation は閲覧と書き込みの操作種別とエントリのパスを info でログに出す。
+// エントリに関わらない操作（ロック）では entry を空にする。attrs は足す属性（移動先など）。
 // エントリの中身やフォームの値は渡さないこと。
-func (s *handler) logOperation(r *http.Request, op, entry string) {
-	s.logger.InfoContext(r.Context(), "operation", "op", op, "entry", entry)
+func (s *handler) logOperation(r *http.Request, op, entry string, attrs ...any) {
+	args := []any{"op", op}
+	if entry != "" {
+		args = append(args, "entry", entry)
+	}
+	s.logger.InfoContext(r.Context(), "operation", append(args, attrs...)...)
 }
 
 // newEntryData は new.html（新規作成フォーム）に渡す。
