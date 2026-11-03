@@ -1,0 +1,17 @@
+# passui install-service が書き出した unit。次の install-service で上書きされるので、手で編集しない。
+# 設定（PASSUI_PORT など）は ~/.config/passui/env に書く。install-service はこのファイルに触らない。
+[Unit]
+Description=passui - password-store をブラウザから管理する Web ツール
+Documentation=https://github.com/backpaper0/passui
+
+[Service]
+ExecStart="/home/alice/.local/share/mise/shims/passui" serve
+WorkingDirectory=%h
+EnvironmentFile=-%E/passui/env
+Environment="PATH=/home/alice/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Restart=on-failure
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target
