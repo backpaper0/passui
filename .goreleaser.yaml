@@ -1,0 +1,41 @@
+# passui のリリース設定。タグ（v1.2.3）を push すると .github/workflows/release.yml が実行する。
+# 成果物は mise の github バックエンド（mise use -g github:backpaper0/passui）が
+# そのまま選べる名前（passui_<version>_linux_<arch>.tar.gz）と checksums.txt。
+version: 2
+
+project_name: passui
+
+builds:
+  - id: passui
+    main: ./cmd/passui
+    binary: passui
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      # OrbStack（Apple シリコン）のゲストは arm64、WSL2 は amd64。
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      # cmd/passui/release_test.go がこの行を読んで、passui version に入ることを確かめている。
+      - -s -w -X github.com/backpaper0/passui/internal/cli.Version={{.Version}}
+
+archives:
+  - formats: [tar.gz]
+    files:
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  sort: asc
+
+release:
+  github:
+    owner: backpaper0
+    name: passui
