@@ -58,34 +58,57 @@ func NewPass(cfg PassConfig, logger *slog.Logger) *Pass {
 // リンク（循環）はたどらない。リンク先がないリンクは無視する。
 // ストアのディレクトリがなければ空を返す。
 func (p *Pass) Entries(ctx context.Context) ([]string, error) {
-	root, err := os.Stat(p.cfg.Dir)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("walk store: %w", err)
-	}
 	var names []string
-	if err := p.walk(ctx, p.cfg.Dir, "", []fs.FileInfo{root}, &names); err != nil {
-		return nil, fmt.Errorf("walk store: %w", err)
+	err := p.walk(ctx, func(dir, rel string, files []fs.DirEntry) {
+		for _, f := range files {
+			if strings.HasSuffix(f.Name(), ".gpg") {
+				names = append(names, strings.TrimSuffix(path.Join(rel, f.Name()), ".gpg"))
+			}
+		}
+	})
+	if err != nil {
+		return nil, err
 	}
 	sort.Strings(names)
 	return names, nil
 }
 
-// walk はストアの中のディレクトリ dir（ストアからの相対パスは rel）のエントリを names に
-// 足す。ancestors は dir とその祖先で、循環の検出に使う。
-func (p *Pass) walk(ctx context.Context, dir, rel string, ancestors []fs.FileInfo, names *[]string) error {
+// walk はストアのディレクトリ（ルートを含む）を 1 つずつ visit に渡す。dir は実際の
+// パス、rel はストアからの相対パス（ルートは ""）、files はその中の "." で始まらない
+// 通常のファイル（シンボリックリンクはリンク先で判断する）。"." で始まるディレクトリには
+// 入らない。シンボリックリンクのディレクトリもたどるが、祖先を指すリンク（循環）は
+// たどらない。リンク先がないリンクは無視する。ストアのディレクトリがなければ何もしない。
+func (p *Pass) walk(ctx context.Context, visit func(dir, rel string, files []fs.DirEntry)) error {
+	root, err := os.Stat(p.cfg.Dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err == nil {
+		err = p.walkDir(ctx, p.cfg.Dir, "", []fs.FileInfo{root}, visit)
+	}
+	if err != nil {
+		return fmt.Errorf("walk store: %w", err)
+	}
+	return nil
+}
+
+// walkDir は walk の再帰。ancestors は dir とその祖先で、循環の検出に使う。
+func (p *Pass) walkDir(ctx context.Context, dir, rel string, ancestors []fs.FileInfo, visit func(dir, rel string, files []fs.DirEntry)) error {
 	des, err := os.ReadDir(dir)
 	if err != nil {
 		return err
 	}
+	var files []fs.DirEntry
+	type sub struct {
+		dir, rel string
+		fi       fs.FileInfo
+	}
+	var subs []sub
 	for _, d := range des {
 		if strings.HasPrefix(d.Name(), ".") {
 			continue
 		}
 		file := filepath.Join(dir, d.Name())
-		name := path.Join(rel, d.Name())
 		fi, err := os.Stat(file) // シンボリックリンクはリンク先を見る
 		if err != nil {
 			if absent(err) {
@@ -95,14 +118,20 @@ func (p *Pass) walk(ctx context.Context, dir, rel string, ancestors []fs.FileInf
 		}
 		switch {
 		case fi.IsDir():
-			if slices.ContainsFunc(ancestors, func(a fs.FileInfo) bool { return os.SameFile(a, fi) }) {
-				continue // 循環
+			if !slices.ContainsFunc(ancestors, func(a fs.FileInfo) bool { return os.SameFile(a, fi) }) {
+				subs = append(subs, sub{file, path.Join(rel, d.Name()), fi})
 			}
-			if err := p.walk(ctx, file, name, append(slices.Clip(ancestors), fi), names); err != nil {
-				return err
-			}
-		case fi.Mode().IsRegular() && strings.HasSuffix(name, ".gpg"):
-			*names = append(*names, strings.TrimSuffix(name, ".gpg"))
+		case fi.Mode().IsRegular():
+			files = append(files, d)
+		}
+	}
+	visit(dir, rel, files)
+	for _, s := range subs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := p.walkDir(ctx, s.dir, s.rel, append(slices.Clip(ancestors), s.fi), visit); err != nil {
+			return err
 		}
 	}
 	return ctx.Err()
@@ -234,103 +263,3 @@ func (p *Pass) Show(ctx context.Context, name string) ([]byte, error) {
 	return nil, err
 }
 
-// Locked はストアのルートの .gpg-id の鍵が、どれも gpg-agent にキャッシュされて
-// いない（ロック中）かを返す。
-func (p *Pass) Locked(ctx context.Context) (bool, error) {
-	return p.locked(ctx, ".")
-}
-
-// locked は、ストアの中のディレクトリ dir（"." はルート）に効く .gpg-id の鍵について、
-// 暗号化用の秘密鍵の keygrip を gpg-agent の KEYINFO に問い合わせ、どれも cached で
-// なければ true を返す。.gpg-id が読めなければ、すべての秘密鍵を見る。
-func (p *Pass) locked(ctx context.Context, dir string) (bool, error) {
-	grips, err := p.keygrips(ctx, p.recipients(dir))
-	if err != nil {
-		return false, err
-	}
-	if len(grips) == 0 {
-		return false, errors.New("no secret key for the store")
-	}
-	args := make([]string, 0, len(grips)+1)
-	for _, g := range grips {
-		args = append(args, "KEYINFO "+g)
-	}
-	out, err := p.exec(ctx, p.tool("gpg-connect-agent"), nil, append(args, "/bye")...)
-	if err != nil {
-		return false, err
-	}
-	// "S KEYINFO <keygrip> <type> <serialno> <idstr> <cached> ..."。cached は "1" か "-"。
-	for _, line := range strings.Split(string(out), "\n") {
-		f := strings.Fields(line)
-		if len(f) > 6 && f[0] == "S" && f[1] == "KEYINFO" && f[6] == "1" {
-			return false, nil
-		}
-	}
-	return true, nil
-}
-
-// recipients は dir に効く .gpg-id（dir から上にたどって最初に見つかるもの）の鍵を返す。
-// pass と同じく、"#" より後ろと空行は無視する。見つからなければ nil。
-func (p *Pass) recipients(dir string) []string {
-	for {
-		b, err := os.ReadFile(filepath.Join(p.cfg.Dir, filepath.FromSlash(dir), ".gpg-id"))
-		if err == nil {
-			var ids []string
-			for _, line := range strings.Split(string(b), "\n") {
-				line, _, _ = strings.Cut(line, "#")
-				if line = strings.TrimSpace(line); line != "" {
-					ids = append(ids, line)
-				}
-			}
-			return ids
-		}
-		if dir == "." || dir == "/" || dir == "" {
-			return nil
-		}
-		dir = path.Dir(dir)
-	}
-}
-
-// keygrips は ids（空ならすべて）の秘密鍵のうち、暗号化に使う鍵（主鍵と副鍵）の
-// keygrip を返す。
-func (p *Pass) keygrips(ctx context.Context, ids []string) ([]string, error) {
-	args := append([]string{"--batch", "--with-colons", "--with-keygrip", "--list-secret-keys", "--"}, ids...)
-	out, err := p.exec(ctx, p.tool("gpg"), nil, args...)
-	if err != nil {
-		return nil, err
-	}
-	var grips []string
-	encrypt := false
-	for _, line := range strings.Split(string(out), "\n") {
-		f := strings.Split(line, ":")
-		switch {
-		case len(f) > 11 && (f[0] == "sec" || f[0] == "ssb"):
-			encrypt = strings.Contains(f[11], "e")
-		case len(f) > 9 && f[0] == "grp":
-			if encrypt {
-				grips = append(grips, f[9])
-			}
-			encrypt = false
-		}
-	}
-	return grips, nil
-}
-
-// tool は gpg などの補助コマンドを、Env の PATH から探す。見つからなければ名前を
-// そのまま返す（プロセスの PATH で探される）。
-func (p *Pass) tool(name string) string {
-	for i := len(p.cfg.Env) - 1; i >= 0; i-- {
-		k, v, _ := strings.Cut(p.cfg.Env[i], "=")
-		if k != "PATH" {
-			continue
-		}
-		for _, dir := range filepath.SplitList(v) {
-			file := filepath.Join(dir, name)
-			if fi, err := os.Stat(file); dir != "" && err == nil && fi.Mode().IsRegular() && fi.Mode()&0o111 != 0 {
-				return file
-			}
-		}
-		break
-	}
-	return name
-}
