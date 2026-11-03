@@ -5,7 +5,7 @@
 ## いつ通すか
 
 - 次のどれかを変えたリリースでは、**OrbStack（公用: macOS + OrbStack）と WSL2（私用: Windows + WSL2）の両方で**すべての項目を通す。
-  - 認証（ログイン、セッション Cookie、ログアウト、Origin の検証）
+  - ログイン（ログイン URL とトークン、セッション Cookie、ログアウト、Origin の検証）
   - Host の検証
   - unit の生成（`install-service` / `uninstall-service`）
   - フロントエンドの JS（htmx の設定、テンプレートの `hx-*` 属性、`internal/server/static/` の JS）
