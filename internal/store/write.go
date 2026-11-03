@@ -33,12 +33,12 @@ func (p *Pass) checkDestination(name string) error {
 	if fi, err := os.Stat(file); err == nil && fi.IsDir() {
 		return fmt.Errorf("destination %q: %w", name, ErrIsDirectory)
 	} else if err != nil && !absent(err) {
-		return fmt.Errorf("stat destination: %w", err)
+		return fmt.Errorf("destination %q: %w", name, err)
 	}
 	if _, err := os.Lstat(file + ".gpg"); err == nil {
 		return fmt.Errorf("destination %q: %w", name, ErrExists)
 	} else if !absent(err) {
-		return fmt.Errorf("stat destination: %w", err)
+		return fmt.Errorf("destination %q: %w", name, err)
 	}
 	return nil
 }

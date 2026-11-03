@@ -137,18 +137,22 @@ func (p *Pass) walkDir(ctx context.Context, dir, rel string, ancestors []fs.File
 	return ctx.Err()
 }
 
-// Exists はエントリのファイル（name.gpg）があるかを返す。
+// Exists はエントリのファイル（name.gpg）があるかを返す。エントリの名前として
+// 正しくない名前（ストアの外を指すなど）は、そういうエントリはないので false。
 func (p *Pass) Exists(ctx context.Context, name string) (bool, error) {
 	file, err := p.entryFile(name)
-	if err != nil {
+	if errors.Is(err, ErrNotFound) {
 		return false, nil
+	}
+	if err != nil {
+		return false, err
 	}
 	fi, err := os.Stat(file)
-	if errors.Is(err, fs.ErrNotExist) {
+	if absent(err) {
 		return false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("stat entry: %w", err)
+		return false, fmt.Errorf("stat entry %q: %w", name, err)
 	}
 	return fi.Mode().IsRegular(), nil
 }
@@ -160,11 +164,11 @@ func (p *Pass) Hash(ctx context.Context, name string) (string, error) {
 		return "", err
 	}
 	b, err := os.ReadFile(file)
-	if errors.Is(err, fs.ErrNotExist) {
-		return "", fmt.Errorf("hash %s: %w", name, ErrNotFound)
+	if absent(err) {
+		return "", fmt.Errorf("hash %q: %w", name, ErrNotFound)
 	}
 	if err != nil {
-		return "", fmt.Errorf("read entry: %w", err)
+		return "", fmt.Errorf("hash %q: %w", name, err)
 	}
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:]), nil
@@ -243,23 +247,37 @@ func (p *Pass) exec(ctx context.Context, prog string, stdin []byte, args ...stri
 // 消えていれば ErrNotFound、エントリの宛先の鍵が gpg-agent にキャッシュされていなければ
 // ErrLocked、それ以外はそのほかの失敗を返す（stderr の文言は見ない）。
 func (p *Pass) Show(ctx context.Context, name string) ([]byte, error) {
+	var out []byte
+	err := p.decrypt(ctx, "show", name, func() (err error) {
+		out, err = p.run(ctx, nil, "show", "--", name)
+		return err
+	})
+	return out, err
+}
+
+// decrypt は、エントリ name の復号が要る pass の呼び出し call（閲覧、再生成）を、失敗の
+// 分類と一緒に行う。呼ぶ前にエントリがなければ ErrNotFound で、call を呼ばない。
+// call が失敗したら、エントリが消えていれば ErrNotFound、エントリの宛先の鍵が
+// gpg-agent にキャッシュされていなければ ErrLocked、それ以外は call のエラーを返す
+// （stderr の文言は見ない）。op はエラー文に入れる操作の名前。
+func (p *Pass) decrypt(ctx context.Context, op, name string, call func() error) error {
 	if ok, err := p.Exists(ctx, name); err != nil {
-		return nil, err
+		return err
 	} else if !ok {
-		return nil, fmt.Errorf("show %s: %w", name, ErrNotFound)
+		return fmt.Errorf("%s %q: %w", op, name, ErrNotFound)
 	}
-	out, err := p.run(ctx, nil, "show", "--", name)
+	err := call()
 	if err == nil {
-		return out, nil
+		return nil
 	}
 	if ok, _ := p.Exists(ctx, name); !ok {
-		return nil, fmt.Errorf("show %s: %w", name, ErrNotFound)
+		return fmt.Errorf("%s %q: %w", op, name, ErrNotFound)
 	}
-	if locked, lerr := p.locked(ctx, path.Dir(name)); lerr == nil && locked {
-		return nil, fmt.Errorf("show %s: %w", name, ErrLocked)
-	} else if lerr != nil {
+	if locked, lerr := p.locked(ctx, path.Dir(name)); lerr != nil {
 		p.logger.WarnContext(ctx, "cannot get lock status", "err", lerr)
+	} else if locked {
+		return fmt.Errorf("%s %q: %w", op, name, ErrLocked)
 	}
-	return nil, err
+	return err
 }
 

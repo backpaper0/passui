@@ -18,7 +18,7 @@ func (p *Pass) Delete(ctx context.Context, name string) error {
 			if absent(err) {
 				return fmt.Errorf("delete %q: %w", name, ErrNotFound)
 			}
-			return fmt.Errorf("stat entry: %w", err)
+			return fmt.Errorf("delete %q: %w", name, err)
 		}
 		_, err = p.run(ctx, nil, "rm", "-f", "--", name)
 		return err

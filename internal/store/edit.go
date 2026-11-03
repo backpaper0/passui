@@ -48,7 +48,7 @@ func (p *Pass) Update(ctx context.Context, e Edit) error {
 			return nil
 		}
 		if _, err := p.run(ctx, nil, "mv", "-f", "--", e.Name, e.NewName); err != nil {
-			return fmt.Errorf("move %s to %s: %w: %w", e.Name, e.NewName, ErrMoveFailed, err)
+			return fmt.Errorf("move %q to %q: %w: %w", e.Name, e.NewName, ErrMoveFailed, err)
 		}
 		return nil
 	})
@@ -60,13 +60,13 @@ func (p *Pass) Update(ctx context.Context, e Edit) error {
 func checkUnchanged(ctx context.Context, p *Pass, e Edit) error {
 	current, err := p.Hash(ctx, e.Name)
 	if errors.Is(err, ErrNotFound) {
-		return fmt.Errorf("update %s: %w: %w", e.Name, ErrConflict, ErrNotFound)
+		return fmt.Errorf("update %q: %w: %w", e.Name, ErrConflict, ErrNotFound)
 	}
 	if err != nil {
 		return err
 	}
 	if e.Hash == "" || current != e.Hash {
-		return fmt.Errorf("update %s: %w", e.Name, ErrConflict)
+		return fmt.Errorf("update %q: %w", e.Name, ErrConflict)
 	}
 	return nil
 }

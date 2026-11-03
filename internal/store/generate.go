@@ -2,8 +2,6 @@ package store
 
 import (
 	"context"
-	"fmt"
-	"path"
 	"strconv"
 )
 
@@ -48,23 +46,9 @@ func (p *Pass) Generate(ctx context.Context, name string, opts GenerateOptions) 
 // 失敗の後に、エントリが消えていれば ErrNotFound、ロック中なら ErrLocked に分類する。
 func (p *Pass) Regenerate(ctx context.Context, name string, opts GenerateOptions) error {
 	return p.write(func() error {
-		if ok, err := p.Exists(ctx, name); err != nil {
+		return p.decrypt(ctx, "regenerate", name, func() error {
+			_, err := p.run(ctx, nil, append([]string{"generate", "-i"}, opts.args(name)...)...)
 			return err
-		} else if !ok {
-			return fmt.Errorf("regenerate %s: %w", name, ErrNotFound)
-		}
-		_, err := p.run(ctx, nil, append([]string{"generate", "-i"}, opts.args(name)...)...)
-		if err == nil {
-			return nil
-		}
-		if ok, _ := p.Exists(ctx, name); !ok {
-			return fmt.Errorf("regenerate %s: %w", name, ErrNotFound)
-		}
-		if locked, lerr := p.locked(ctx, path.Dir(name)); lerr == nil && locked {
-			return fmt.Errorf("regenerate %s: %w", name, ErrLocked)
-		} else if lerr != nil {
-			p.logger.WarnContext(ctx, "cannot get lock status", "err", lerr)
-		}
-		return err
+		})
 	})
 }
