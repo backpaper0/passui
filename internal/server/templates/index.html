@@ -4,12 +4,28 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>passui</title>
+<!-- 4xx と 5xx の部分応答も差し替える（分類したメッセージやエラー ID を出すため）。 -->
+<meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"[2345]..","swap":true,"error":false},{"code":"...","swap":false}]}'>
+<link rel="stylesheet" href="/static/passui.css">
 <script src="/static/htmx.min.js"></script>
 </head>
 <body>
-<header>
+<header class="header">
 <h1>passui</h1>
 <form method="post" action="/logout"><button type="submit">ログアウト</button></form>
 </header>
+<main class="panes">
+<nav id="left-pane" class="pane" aria-label="ストア">
+<div id="tree"
+     hx-get="/tree"
+     hx-trigger="visibilitychange[document.visibilityState === 'visible'] from:document"
+     hx-swap="innerHTML">
+{{template "tree.html" .Tree}}
+</div>
+</nav>
+<section id="right-pane" class="pane" aria-live="polite">
+<p class="placeholder">左のツリーからエントリを選んでください。</p>
+</section>
+</main>
 </body>
 </html>

@@ -1,5 +1,5 @@
-// Package server は passui の HTTP シームである。設定とロガー（以降のチケットでは
-// ストア バックエンドも）から http.Handler を組み立てる。
+// Package server は passui の HTTP シームである。設定（ストア バックエンドを含む）と
+// ロガーから http.Handler を組み立てる。
 package server
 
 import (
@@ -10,6 +10,7 @@ import (
 	"net/http"
 
 	"github.com/backpaper0/passui/internal/secret"
+	"github.com/backpaper0/passui/internal/store"
 )
 
 //go:embed templates/*.html
@@ -26,6 +27,8 @@ type Config struct {
 	Port int
 	// Token はログイン トークン。serve が起動ごとに作る。空ならログインできない。
 	Token secret.Value
+	// Store はストア バックエンド。
+	Store store.Backend
 }
 
 // New は passui の http.Handler を返す。すべてのルートに共通のミドルウェアが掛かり、
@@ -53,10 +56,17 @@ func (s *handler) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", s.top)
 	mux.HandleFunc("GET /login", s.login)
 	mux.HandleFunc("POST /logout", s.logout)
+	mux.HandleFunc("GET /tree", s.tree)
+}
+
+type indexData struct {
+	Tree treeData
 }
 
 func (s *handler) top(w http.ResponseWriter, r *http.Request) {
-	s.render(w, r, http.StatusOK, "index.html", nil)
+	// ツリーの取得に失敗しても、画面の枠は出す（左ペインにエラー ID が出る）。
+	tree, _ := s.loadTree(r)
+	s.render(w, r, http.StatusOK, "index.html", indexData{Tree: tree})
 }
 
 // render はテンプレートを status で描画する。途中で失敗したら応答は差し替えられないので、

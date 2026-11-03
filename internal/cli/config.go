@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/backpaper0/passui/internal/store"
 )
 
 // DefaultPort は PASSUI_PORT を省いたときのポート。
@@ -83,6 +85,30 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// passConfig はストア バックエンドの設定を env から組み立てる。ストアは
+// PASSWORD_STORE_DIR（既定は ~/.password-store）、GNUPGHOME（既定は ~/.gnupg）。
+// 子プロセスには env をそのまま土台として渡す。
+func passConfig(env environ, passPath string) (store.PassConfig, error) {
+	home, _ := env.lookup("HOME")
+	dir, _ := env.lookup("PASSWORD_STORE_DIR")
+	gnupg, _ := env.lookup("GNUPGHOME")
+	if (dir == "" || gnupg == "") && home == "" {
+		return store.PassConfig{}, fmt.Errorf("HOME が空です（PASSWORD_STORE_DIR と GNUPGHOME の既定値を決められません）")
+	}
+	if dir == "" {
+		dir = filepath.Join(home, ".password-store")
+	}
+	if gnupg == "" {
+		gnupg = filepath.Join(home, ".gnupg")
+	}
+	list := make([]string, 0, len(env))
+	for k, v := range env {
+		list = append(list, k+"="+v)
+	}
+	sort.Strings(list)
+	return store.PassConfig{Pass: passPath, Dir: dir, GnupgHome: gnupg, Env: list}, nil
 }
 
 // lookPath は env の PATH から実行可能な name を探す（os.Getenv の PATH は見ない）。

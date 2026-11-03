@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"context"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -18,6 +19,13 @@ import (
 func runtimeDirEnv(t *testing.T) string {
 	t.Helper()
 	return "XDG_RUNTIME_DIR=" + t.TempDir()
+}
+
+// homeEnv は空の HOME を返す。ストア（~/.password-store）と GNUPGHOME（~/.gnupg）の
+// 既定値はここから決まる。
+func homeEnv(t *testing.T) string {
+	t.Helper()
+	return "HOME=" + t.TempDir()
 }
 
 func TestLoginWhenNotRunning(t *testing.T) {
@@ -42,6 +50,14 @@ func TestLoginWithoutRuntimeDirIsError(t *testing.T) {
 	}
 }
 
+func TestServeWithoutHomeOrStoreDirIsError(t *testing.T) {
+	r := run(t, []string{"PATH=" + fakePassDir(t), "PASSUI_PORT=" + strconv.Itoa(freePort(t)), runtimeDirEnv(t)}, "serve")
+
+	if r.code != 1 || !strings.Contains(r.stderr, "HOME") {
+		t.Errorf("code=%d stderr=%s, want an error about HOME", r.code, r.stderr)
+	}
+}
+
 func TestServeWithoutRuntimeDirIsError(t *testing.T) {
 	r := run(t, []string{"PATH=" + fakePassDir(t), "PASSUI_PORT=" + strconv.Itoa(freePort(t))}, "serve")
 
@@ -62,8 +78,13 @@ func TestServeWritesTokenAndLoginPrintsWorkingURL(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(runtimeDir, "passui"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	storeDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(storeDir, "from-store-dir.gpg"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	port := strconv.Itoa(freePort(t))
-	env := []string{"PATH=" + fakePassDir(t), "PASSUI_PORT=" + port, "XDG_RUNTIME_DIR=" + runtimeDir, "PASSUI_LOG_LEVEL=debug"}
+	env := []string{"PATH=" + fakePassDir(t), "PASSUI_PORT=" + port, "XDG_RUNTIME_DIR=" + runtimeDir, "PASSUI_LOG_LEVEL=debug",
+		"PASSWORD_STORE_DIR=" + storeDir, "GNUPGHOME=" + t.TempDir()}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stderr := &lockedBuffer{}
@@ -95,9 +116,14 @@ func TestServeWritesTokenAndLoginPrintsWorkingURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	body, _ := io.ReadAll(res.Body)
 	res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		t.Errorf("top with session: status = %d, want 200", res.StatusCode)
+	}
+	// ツリーは PASSWORD_STORE_DIR のストアから作る。
+	if !strings.Contains(string(body), `data-entry="from-store-dir"`) {
+		t.Errorf("top does not show the store in PASSWORD_STORE_DIR:\n%s", body)
 	}
 
 	// パーミッション
@@ -157,7 +183,7 @@ func TestServeKeepsAnotherInstancesTokenWhenPortInUse(t *testing.T) {
 	defer l.Close()
 	port := strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
 
-	if r := run(t, []string{"PATH=" + fakePassDir(t), "PASSUI_PORT=" + port, "XDG_RUNTIME_DIR=" + runtimeDir}, "serve"); r.code != 1 {
+	if r := run(t, []string{"PATH=" + fakePassDir(t), "PASSUI_PORT=" + port, "XDG_RUNTIME_DIR=" + runtimeDir, homeEnv(t)}, "serve"); r.code != 1 {
 		t.Fatalf("serve: code = %d, want 1", r.code)
 	}
 
