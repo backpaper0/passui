@@ -16,9 +16,17 @@
 </header>
 <main class="panes">
 <nav id="left-pane" class="pane" aria-label="ストア">
+<!-- 検索語が空でなければ /tree は検索結果を返す。空にするとツリーに戻る。 -->
+<input id="search" class="search" type="search" name="q"
+       placeholder="検索" aria-label="エントリを検索" autocomplete="off"
+       hx-get="/tree"
+       hx-trigger="input changed delay:200ms, search"
+       hx-target="#tree"
+       hx-swap="innerHTML">
 <!-- 既定のフォルダは、右ペインの #selected-entry（選んでいるエントリ）から決まる。 -->
 <button type="button" class="new-entry" hx-get="/new" hx-target="#right-pane" hx-swap="innerHTML" hx-include="#selected-entry">＋ 新規エントリ</button>
 <div id="tree"
+     hx-include="#search"
      hx-get="/tree"
      hx-trigger="visibilitychange[document.visibilityState === 'visible'] from:document, tree-changed from:body"
      hx-swap="innerHTML">
