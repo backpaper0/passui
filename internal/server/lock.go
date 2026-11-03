@@ -53,7 +53,7 @@ const lockChangedEvent = "lock-changed"
 // htmx 以外（JS なし）からは / に戻す。
 func (s *handler) lock(w http.ResponseWriter, r *http.Request) {
 	err := s.cfg.Store.Lock(r.Context())
-	if r.Header.Get("HX-Request") != "true" {
+	if !isHTMX(r) {
 		if err != nil {
 			logFailure(r.Context(), s.logger, "lock", "err", err)
 		} else {
