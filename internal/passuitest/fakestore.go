@@ -6,10 +6,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
-	"strings"
 	"sync"
 
-	"github.com/backpaper0/passui/internal/secret"
 	"github.com/backpaper0/passui/internal/store"
 )
 
@@ -97,7 +95,7 @@ func (f *FakeStore) Hash(ctx context.Context, name string) (string, error) {
 	}
 	c, ok := f.entries[name]
 	if !ok {
-		return "", fmt.Errorf("hash %s: %w", name, store.ErrNotFound)
+		return "", fmt.Errorf("hash %q: %w", name, store.ErrNotFound)
 	}
 	sum := sha256.Sum256([]byte(c))
 	return hex.EncodeToString(sum[:]), nil
@@ -111,10 +109,10 @@ func (f *FakeStore) Show(ctx context.Context, name string) ([]byte, error) {
 	}
 	c, ok := f.entries[name]
 	if !ok {
-		return nil, fmt.Errorf("show %s: %w", name, store.ErrNotFound)
+		return nil, fmt.Errorf("show %q: %w", name, store.ErrNotFound)
 	}
 	if f.locked {
-		return nil, fmt.Errorf("show %s: %w", name, store.ErrLocked)
+		return nil, fmt.Errorf("show %q: %w", name, store.ErrLocked)
 	}
 	return []byte(c), nil
 }
@@ -136,78 +134,6 @@ func (f *FakeStore) Lock(ctx context.Context) error {
 		return f.err
 	}
 	f.locked = true
-	return nil
-}
-
-// Create は store.Pass.Create と同じ確認をしてからエントリを置く。「暗号文」は
-// ストアに書かれる本文（末尾に改行が付いたもの）そのものにする（Content で読める）。
-func (f *FakeStore) Create(ctx context.Context, name string, content secret.Value) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.err != nil {
-		return f.err
-	}
-	if err := f.checkDestination(name); err != nil {
-		return fmt.Errorf("create %s: %w", name, err)
-	}
-	f.entries[name] = store.WithTrailingNewline(content.Reveal())
-	return nil
-}
-
-// Update は store.Pass.Update と同じ確認をしてからエントリを書き換える。「暗号文」は
-// 書かれた本文（末尾に改行が付いたもの）そのものにする。
-func (f *FakeStore) Update(ctx context.Context, e store.Edit) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.err != nil {
-		return f.err
-	}
-	c, ok := f.entries[e.Name]
-	if !ok {
-		return fmt.Errorf("update %s: %w: %w", e.Name, store.ErrConflict, store.ErrNotFound)
-	}
-	if sum := sha256.Sum256([]byte(c)); e.Hash == "" || hex.EncodeToString(sum[:]) != e.Hash {
-		return fmt.Errorf("update %s: %w", e.Name, store.ErrConflict)
-	}
-	if e.Moves() {
-		if err := f.checkDestination(e.NewName); err != nil {
-			return fmt.Errorf("move %s: %w", e.Name, err)
-		}
-	}
-	f.entries[e.Name] = store.WithTrailingNewline(e.Content.Reveal())
-	if !e.Moves() {
-		return nil
-	}
-	if f.moveErr != nil {
-		return fmt.Errorf("move %s to %s: %w: %w", e.Name, e.NewName, store.ErrMoveFailed, f.moveErr)
-	}
-	f.entries[e.NewName] = f.entries[e.Name]
-	delete(f.entries, e.Name)
-	return nil
-}
-
-// SetMoveErr を nil 以外にすると、以降の Update の移動（pass mv）だけが失敗する
-// （本文は元のパスに保存され、store.ErrMoveFailed と err を包んだエラーを返す）。
-func (f *FakeStore) SetMoveErr(err error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.moveErr = err
-}
-
-// checkDestination は store.Pass と同じ規則で、新しいエントリ name を置けるかを確かめる。
-// f.mu を持って呼ぶこと。
-func (f *FakeStore) checkDestination(name string) error {
-	if err := store.CheckNewName(name); err != nil {
-		return err
-	}
-	for n := range f.entries {
-		if strings.HasPrefix(n, name+"/") {
-			return store.ErrIsDirectory
-		}
-	}
-	if _, ok := f.entries[name]; ok {
-		return store.ErrExists
-	}
 	return nil
 }
 

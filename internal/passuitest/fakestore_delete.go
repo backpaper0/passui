@@ -15,7 +15,7 @@ func (f *FakeStore) Delete(ctx context.Context, name string) error {
 		return f.err
 	}
 	if _, ok := f.entries[name]; !ok {
-		return fmt.Errorf("delete %s: %w", name, store.ErrNotFound)
+		return fmt.Errorf("delete %q: %w", name, store.ErrNotFound)
 	}
 	delete(f.entries, name)
 	return nil
