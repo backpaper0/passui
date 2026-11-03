@@ -20,6 +20,7 @@ import (
 
 	"github.com/backpaper0/passui/internal/secret"
 	"github.com/backpaper0/passui/internal/server"
+	"github.com/backpaper0/passui/internal/store"
 )
 
 // DefaultPort は Options.Port を省いたときのポート。
@@ -85,7 +86,7 @@ func (h *Harness) checkCanaries() {
 	}
 }
 
-// Options は Serve に渡す Handler の設定。以降のチケットでストア バックエンドなどを足す。
+// Options は Serve に渡す Handler の設定。
 type Options struct {
 	// Port は Handler の設定のポート。0 なら DefaultPort。
 	Port int
@@ -95,6 +96,9 @@ type Options struct {
 	// Anonymous が true なら、ログインしないまま返す。
 	// false（既定）なら Serve の中でログインし、以降の Do にセッション Cookie を付ける。
 	Anonymous bool
+	// Store はストア バックエンド。nil なら空の FakeStore を使う。
+	// 統合テストでは NewGPGStore(...).Backend() を渡す。
+	Store store.Backend
 }
 
 // Serve は server.New で Handler を組み立てる。既定ではログインまで済ませる。
@@ -107,7 +111,10 @@ func (h *Harness) Serve(opts Options) *Server {
 	} else {
 		h.AddCanary(opts.Token)
 	}
-	cfg := server.Config{Port: opts.Port, Token: secret.Of(opts.Token)}
+	if opts.Store == nil {
+		opts.Store = NewFakeStore()
+	}
+	cfg := server.Config{Port: opts.Port, Token: secret.Of(opts.Token), Store: opts.Store}
 	s := h.newServer(opts.Port, server.New(cfg, h.Logger))
 	s.Token = opts.Token
 	if !opts.Anonymous {

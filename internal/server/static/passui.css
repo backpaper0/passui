@@ -1,0 +1,41 @@
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  color: #1f2328;
+  background: #ffffff;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid #d0d7de;
+}
+.header h1 { margin: 0; font-size: 1.25rem; }
+.header form { margin: 0; }
+
+/* 2 ペイン。狭い画面では縦に並べる。 */
+.panes {
+  display: grid;
+  grid-template-columns: minmax(16rem, 1fr) 2fr;
+  min-height: calc(100vh - 3rem);
+}
+.pane { padding: 1rem; overflow: auto; }
+#left-pane { border-right: 1px solid #d0d7de; }
+
+@media (max-width: 48rem) {
+  .panes { grid-template-columns: 1fr; }
+  #left-pane { border-right: none; border-bottom: 1px solid #d0d7de; }
+}
+
+.tree { list-style: none; margin: 0; padding-left: 1rem; }
+#tree > .tree { padding-left: 0; }
+.tree summary { cursor: pointer; }
+.tree .entry { padding: 0.125rem 0; }
+
+.placeholder { color: #59636e; }
+.error { color: #d1242f; }

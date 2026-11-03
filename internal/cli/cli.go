@@ -14,6 +14,7 @@ import (
 
 	"github.com/backpaper0/passui/internal/secret"
 	"github.com/backpaper0/passui/internal/server"
+	"github.com/backpaper0/passui/internal/store"
 )
 
 // Version は passui のバージョン。リリース時に -ldflags "-X" で埋め込む。
@@ -99,6 +100,14 @@ func serve(ctx context.Context, env environ, stderr io.Writer) int {
 		return 1
 	}
 
+	storeCfg, err := passConfig(env, passPath)
+	if err != nil {
+		logger.Error("cannot locate the store", "err", err)
+		return 1
+	}
+	logger.Info("store", "dir", storeCfg.Dir, "gnupghome", storeCfg.GnupgHome)
+	backend := store.NewPass(storeCfg, logger)
+
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port))
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -123,7 +132,7 @@ func serve(ctx context.Context, env environ, stderr io.Writer) int {
 	}()
 
 	srv := &http.Server{
-		Handler:           server.New(server.Config{Port: cfg.Port, Token: token}, logger),
+		Handler:           server.New(server.Config{Port: cfg.Port, Token: token, Store: backend}, logger),
 		ReadHeaderTimeout: 10 * time.Second,
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
 	}

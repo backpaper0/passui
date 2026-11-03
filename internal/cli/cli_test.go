@@ -132,7 +132,7 @@ func TestServeFailsWhenPortInUse(t *testing.T) {
 	defer l.Close()
 	port := strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
 
-	r := run(t, []string{"PATH=" + fakePassDir(t), "PASSUI_PORT=" + port, runtimeDirEnv(t)}, "serve")
+	r := run(t, []string{"PATH=" + fakePassDir(t), "PASSUI_PORT=" + port, runtimeDirEnv(t), homeEnv(t)}, "serve")
 
 	if r.code != 1 {
 		t.Errorf("code = %d, want 1", r.code)
@@ -144,7 +144,7 @@ func TestServeFailsWhenPortInUse(t *testing.T) {
 
 func TestServeListensOnLoopbackUntilCancelled(t *testing.T) {
 	port := strconv.Itoa(freePort(t))
-	env := []string{"PATH=" + fakePassDir(t), "PASSUI_PORT=" + port, "PASSUI_TYPO=1", runtimeDirEnv(t)}
+	env := []string{"PATH=" + fakePassDir(t), "PASSUI_PORT=" + port, "PASSUI_TYPO=1", runtimeDirEnv(t), homeEnv(t)}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stderr := &lockedBuffer{}
@@ -188,7 +188,7 @@ func TestServeDefaultsToPort3560(t *testing.T) {
 	}
 	defer l.Close()
 
-	r := run(t, []string{"PATH=" + fakePassDir(t), runtimeDirEnv(t)}, "serve")
+	r := run(t, []string{"PATH=" + fakePassDir(t), runtimeDirEnv(t), homeEnv(t)}, "serve")
 
 	if r.code != 1 || !strings.Contains(r.stderr, "127.0.0.1:3560") {
 		t.Errorf("code=%d stderr=%s, want an error about 127.0.0.1:3560", r.code, r.stderr)

@@ -4,11 +4,35 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"html/template"
 	"log/slog"
 	"net/http"
+
+	"github.com/backpaper0/passui/internal/store"
 )
+
+// storeFailure はストア バックエンドのエラーを、応答のステータスとブラウザに出す
+// メッセージに分類する。分類できないエラー（そのほかの失敗）は op と attrs と一緒に
+// error でログに出し、「操作に失敗しました」とエラー ID を返す。エラー文（子プロセスの
+// stderr などを含みうる）はブラウザに出さない。attrs にシークレットを入れないこと。
+func (s *handler) storeFailure(r *http.Request, err error, op string, attrs ...any) (int, string) {
+	switch {
+	case errors.Is(err, store.ErrLocked):
+		return http.StatusLocked, "ロック中です。ゲストのターミナルで解錠してください"
+	case errors.Is(err, store.ErrNotFound):
+		return http.StatusNotFound, "エントリが見つかりません"
+	case errors.Is(err, store.ErrExists):
+		return http.StatusConflict, "同じ名前のエントリが既にあります"
+	case errors.Is(err, store.ErrIsDirectory):
+		return http.StatusConflict, "同じ名前のフォルダがあります"
+	case errors.Is(err, store.ErrConflict):
+		return http.StatusConflict, "エントリがほかで変更されています"
+	}
+	id := logFailure(r.Context(), s.logger, op, append(attrs, "err", err)...)
+	return http.StatusInternalServerError, failureMessage(id)
+}
 
 // newErrorID はブラウザとログを結び付けるエラー ID（16 桁の 16 進数）を作る。
 func newErrorID() string {
