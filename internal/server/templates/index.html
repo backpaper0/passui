@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>passui</title>
+<!-- 4xx と 5xx の部分応答も差し替える（分類したメッセージやエラー ID を出すため）。 -->
+<meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"[2345]..","swap":true,"error":false},{"code":"...","swap":false}]}'>
+<link rel="stylesheet" href="/static/passui.css">
+<link rel="stylesheet" href="/static/generate.css">
+<script src="/static/htmx.min.js"></script>
+<script src="/static/passui.js" defer></script>
+<script src="/static/passui-lock.js" defer></script>
+<script src="/static/clipboard.js" defer></script>
+</head>
+<body>
+<header class="header">
+<h1>passui</h1>
+{{template "lock-badge" .Badge}}
+{{template "lock-button"}}
+<form method="post" action="/logout"><button type="submit">ログアウト</button></form>
+</header>
+<main class="panes">
+<nav id="left-pane" class="pane" aria-label="ストア">
+<!-- 検索語が空でなければ /tree は検索結果を返す。空にするとツリーに戻る。 -->
+<input id="search" class="search" type="search" name="q"
+       placeholder="検索" aria-label="エントリを検索" autocomplete="off"
+       hx-get="/tree"
+       hx-trigger="input changed delay:200ms, search"
+       hx-target="#tree"
+       hx-swap="innerHTML">
+<!-- 既定のフォルダは、右ペインの #selected-entry（選んでいるエントリ）から決まる。 -->
+<button type="button" class="new-entry" hx-get="/new" hx-target="#right-pane" hx-swap="innerHTML" hx-include="#selected-entry">＋ 新規エントリ</button>
+<div id="tree"
+     hx-include="#search"
+     hx-get="/tree"
+     hx-trigger="visibilitychange[document.visibilityState === 'visible'] from:document, tree-changed from:body"
+     hx-swap="innerHTML">
+{{template "tree.html" .Tree}}
+</div>
+</nav>
+<section id="right-pane" class="pane" aria-live="polite">
+<p class="placeholder">左のツリーからエントリを選んでください。</p>
+</section>
+</main>
+</body>
+</html>

@@ -1,0 +1,14 @@
+<section class="delete-confirm" data-entry="{{.Name}}">
+<h2>{{.Name}}</h2>
+{{- if .Failure}}
+<p class="error" role="alert">{{.Failure}}</p>
+{{- end}}
+<p>このエントリを削除しますか？ 元に戻せません。</p>
+<form hx-post="{{deleteURL .Name}}" hx-target="#right-pane" hx-swap="innerHTML">
+<input type="hidden" name="confirm" value="yes">
+<p class="actions">
+<button type="submit" class="danger">削除する</button>
+<button type="button" hx-get="{{entryURL .Name}}" hx-target="#right-pane" hx-swap="innerHTML">やめる</button>
+</p>
+</form>
+</section>

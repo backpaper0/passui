@@ -1,0 +1,5 @@
+{{define "lock-badge"}}<span id="lock-badge" class="badge badge-{{.State}}" role="status"
+      hx-get="/lock-status"
+      hx-trigger="visibilitychange[document.visibilityState === 'visible'] from:document, lock-changed from:body"
+      hx-swap="outerHTML"{{if .OOB}} hx-swap-oob="true"{{end}}>{{.Text}}</span>
+{{end}}

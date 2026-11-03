@@ -1,0 +1,12 @@
+{{define "folder"}}<ul class="tree">
+{{- range .Folders}}
+<li class="folder"><details open data-folder="{{.Path}}"><summary>{{.Name}}/</summary>{{template "folder" .}}</details></li>
+{{- end}}
+{{- range .Entries}}
+<li class="entry" data-entry="{{.Path}}"><button type="button" class="entry-link" hx-get="{{entryURL .Path}}" hx-target="#right-pane" hx-swap="innerHTML">{{.Name}}</button></li>
+{{- end}}
+</ul>{{end -}}
+{{if .Failure}}<p class="error" role="alert">{{.Failure}}</p>
+{{else if .Empty}}<p class="placeholder">エントリがありません。</p>
+{{else}}{{template "folder" .Root}}
+{{end}}
