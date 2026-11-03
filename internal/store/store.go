@@ -35,6 +35,9 @@ type Backend interface {
 	// Locked はロック中か（ストアの鍵の解錠のキャッシュが gpg-agent にないか）を返す。
 	// gpg の文言ではなく、gpg-agent の KEYINFO の cached フラグで判定する。
 	Locked(ctx context.Context) (bool, error)
+	// Lock は gpg-agent から鍵の解錠のキャッシュを消す（明示ロック、CLEAR_PASSPHRASE）。
+	// キャッシュは gpg-agent のものなので、ターミナルの pass もロックされる。
+	Lock(ctx context.Context) error
 	// Create は新しいエントリ name を content で作る（pass insert -m -f）。暗号化だけなので
 	// ロック中でも作れる。content の末尾に改行がなければ足す（端末の pass insert -m と揃える）。
 	// 名前が正しくなければ ErrInvalidName、末尾が "/" か同名のディレクトリがあれば
@@ -46,6 +49,9 @@ type Backend interface {
 	// Regenerate はエントリ name の 1 行目だけを新しいパスワードに替え、2 行目以降を残す
 	// （pass generate -i）。復号が要るので、ロック中なら ErrLocked、なければ ErrNotFound。
 	Regenerate(ctx context.Context, name string, opts GenerateOptions) error
+	// Delete はエントリ name を消す（pass rm -f）。復号しないのでロック中でも消せる。
+	// エントリがなければ ErrNotFound を返す。
+	Delete(ctx context.Context, name string) error
 }
 
 // 分類したエラー。Backend の実装はこれらを（必要なら %w で包んで）返す。

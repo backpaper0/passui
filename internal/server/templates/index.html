@@ -10,11 +10,14 @@
 <link rel="stylesheet" href="/static/generate.css">
 <script src="/static/htmx.min.js"></script>
 <script src="/static/passui.js" defer></script>
+<script src="/static/passui-lock.js" defer></script>
+<script src="/static/clipboard.js" defer></script>
 </head>
 <body>
 <header class="header">
 <h1>passui</h1>
 {{template "lock-badge" .Badge}}
+{{template "lock-button"}}
 <form method="post" action="/logout"><button type="submit">ログアウト</button></form>
 </header>
 <main class="panes">

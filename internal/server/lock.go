@@ -43,6 +43,35 @@ func (s *handler) loadBadge(r *http.Request) badgeData {
 	return badgeData{State: badgeUnlocked}
 }
 
+// lockChangedEvent は、ロック状態が変わったときにバッジを読み直させる htmx のイベント
+// （badge.html の hx-trigger）。
+const lockChangedEvent = "lock-changed"
+
+// lock は POST /lock（ヘッダーのロック ボタン）。gpg-agent のキャッシュを消す。
+// ログインは続く。htmx からは右ペインを差し替える応答を返し、詳細や編集中の入力を
+// 確認なしで破棄する（失敗してもエラーで差し替える）。バッジは成否によらず読み直させる。
+// htmx 以外（JS なし）からは / に戻す。
+func (s *handler) lock(w http.ResponseWriter, r *http.Request) {
+	err := s.cfg.Store.Lock(r.Context())
+	if r.Header.Get("HX-Request") != "true" {
+		if err != nil {
+			logFailure(r.Context(), s.logger, "lock", "err", err)
+		} else {
+			s.logger.InfoContext(r.Context(), "operation", "op", "lock")
+		}
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	w.Header().Set("HX-Trigger", lockChangedEvent)
+	if err != nil {
+		status, msg := s.storeFailure(r, err, "lock")
+		s.render(w, r, status, "failure.html", msg)
+		return
+	}
+	s.logger.InfoContext(r.Context(), "operation", "op", "lock")
+	s.render(w, r, http.StatusOK, "lock_done.html", nil)
+}
+
 // lockStatus は GET /lock-status。ヘッダーのバッジだけを返す（htmx で差し替える）。
 // ロックの操作（#31）の後は、応答に HX-Trigger: lock-changed を付ければバッジが読み直される。
 func (s *handler) lockStatus(w http.ResponseWriter, r *http.Request) {
