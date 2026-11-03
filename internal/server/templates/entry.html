@@ -4,6 +4,7 @@
 <p class="notice" role="status">{{.Notice}}</p>
 {{- end}}
 <h2>{{.Name}}</h2>
+<button type="button" class="delete-button" hx-get="{{.DeleteURL}}" hx-target="#right-pane" hx-swap="innerHTML">削除</button>
 <div class="password-row">
 <label for="entry-password">パスワード</label>
 <input id="entry-password" class="secret" type="password" value="{{.Password}}" readonly autocomplete="off" spellcheck="false">
