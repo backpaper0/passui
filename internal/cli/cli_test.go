@@ -132,7 +132,7 @@ func TestServeFailsWhenPortInUse(t *testing.T) {
 	defer l.Close()
 	port := strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
 
-	r := run(t, []string{"PATH=" + fakePassDir(t), "PASSUI_PORT=" + port}, "serve")
+	r := run(t, []string{"PATH=" + fakePassDir(t), "PASSUI_PORT=" + port, runtimeDirEnv(t)}, "serve")
 
 	if r.code != 1 {
 		t.Errorf("code = %d, want 1", r.code)
@@ -144,7 +144,7 @@ func TestServeFailsWhenPortInUse(t *testing.T) {
 
 func TestServeListensOnLoopbackUntilCancelled(t *testing.T) {
 	port := strconv.Itoa(freePort(t))
-	env := []string{"PATH=" + fakePassDir(t), "PASSUI_PORT=" + port, "PASSUI_TYPO=1"}
+	env := []string{"PATH=" + fakePassDir(t), "PASSUI_PORT=" + port, "PASSUI_TYPO=1", runtimeDirEnv(t)}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stderr := &lockedBuffer{}
@@ -153,8 +153,9 @@ func TestServeListensOnLoopbackUntilCancelled(t *testing.T) {
 
 	res := getWithRetry(t, "http://127.0.0.1:"+port+"/", "passui.localhost:"+port)
 	res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		t.Errorf("status = %d, want 200", res.StatusCode)
+	// 応答が返れば待ち受けている。ログインしていないので 401 になる。
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", res.StatusCode)
 	}
 
 	cancel()
@@ -187,12 +188,16 @@ func TestServeDefaultsToPort3560(t *testing.T) {
 	}
 	defer l.Close()
 
-	r := run(t, []string{"PATH=" + fakePassDir(t)}, "serve")
+	r := run(t, []string{"PATH=" + fakePassDir(t), runtimeDirEnv(t)}, "serve")
 
 	if r.code != 1 || !strings.Contains(r.stderr, "127.0.0.1:3560") {
 		t.Errorf("code=%d stderr=%s, want an error about 127.0.0.1:3560", r.code, r.stderr)
 	}
 }
+
+// testClient は接続を使い回さない。使い回すと Transport が使われない接続を先に張ることがあり、
+// その接続が Shutdown を 5 秒待たせる（StateNew の接続は 5 秒たつまで idle とみなされない）。
+var testClient = &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
 
 func getWithRetry(t *testing.T, url, host string) *http.Response {
 	t.Helper()
@@ -200,7 +205,7 @@ func getWithRetry(t *testing.T, url, host string) *http.Response {
 	for {
 		req, _ := http.NewRequest(http.MethodGet, url, nil)
 		req.Host = host
-		res, err := http.DefaultClient.Do(req)
+		res, err := testClient.Do(req)
 		if err == nil {
 			return res
 		}

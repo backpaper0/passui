@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>passui - ログインが必要です</title>
+</head>
+<body>
+<h1>passui</h1>
+{{if .WrongHost}}
+<p>ログインは <code>http://{{.LoginHost}}/</code> でだけ受け付けます。<code>passui login</code> が出す URL をそのまま開いてください。</p>
+{{else}}
+<p>ログインしていません。ゲストのターミナルで次を実行し、表示された URL をこのブラウザで開いてください。</p>
+<pre><code>passui login</code></pre>
+{{end}}
+</body>
+</html>

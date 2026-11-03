@@ -15,7 +15,9 @@ import (
 func Middleware(cfg Config, logger *slog.Logger, next http.Handler) http.Handler {
 	// 外側から順に掛かる。no-store はどの応答にも付くよう最も外側に置き、
 	// recover はアクセスログが 500 を記録できるようアクセスログの内側に置く。
+	// Origin の検証は Host を検証した後に、Host から自分のオリジンを組み立てて行う。
 	h := next
+	h = checkOrigin(h)
 	h = checkHost(cfg, logger, h)
 	h = recoverPanic(logger, h)
 	h = accessLog(logger, h)

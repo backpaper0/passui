@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/backpaper0/passui/internal/secret"
 	"github.com/backpaper0/passui/internal/server"
 )
 
@@ -25,6 +26,7 @@ const help = `passui - password-store をブラウザから管理する Web ツ�
 
 サブコマンド:
   serve     サーバーを起動する（127.0.0.1 で待ち受ける）
+  login     動いている passui のログイン URL を表示する
   version   バージョンを表示する
 
 設定（環境変数）:
@@ -48,6 +50,8 @@ func Run(ctx context.Context, args []string, env []string, stdout, stderr io.Wri
 		return 0
 	case "serve":
 		return serve(ctx, parseEnviron(env), stderr)
+	case "login":
+		return login(parseEnviron(env), stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "passui: 不明なサブコマンドです: %s\n\n%s", args[0], help)
 		return 2
@@ -89,6 +93,12 @@ func serve(ctx context.Context, env environ, stderr io.Writer) int {
 	}
 	logger.Debug("found pass", "path", passPath)
 
+	dir, err := runtimeDir(env)
+	if err != nil {
+		logger.Error("no runtime directory", "err", err)
+		return 1
+	}
+
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port))
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -96,14 +106,30 @@ func serve(ctx context.Context, env environ, stderr io.Writer) int {
 		return 1
 	}
 
+	// トークンは待ち受けに成功してから書く。ポートが使用中で失敗したときに、
+	// 動いているほかの passui のトークンを上書きしないため。
+	token := secret.New()
+	url := fmt.Sprintf("http://passui.localhost:%d/", cfg.Port)
+	if err := writeRuntimeFiles(dir, token, url); err != nil {
+		ln.Close()
+		logger.Error("cannot write login token", "dir", dir, "err", err)
+		return 1
+	}
+	// 正常に止まるときにトークンを消す。
+	defer func() {
+		if err := removeRuntimeFiles(dir); err != nil {
+			logger.Warn("cannot remove login token", "dir", dir, "err", err)
+		}
+	}()
+
 	srv := &http.Server{
-		Handler:           server.New(server.Config{Port: cfg.Port}, logger),
+		Handler:           server.New(server.Config{Port: cfg.Port, Token: token}, logger),
 		ReadHeaderTimeout: 10 * time.Second,
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
 	}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
-	logger.Info("listening", "addr", addr, "url", fmt.Sprintf("http://passui.localhost:%d/", cfg.Port))
+	logger.Info("listening", "addr", addr, "url", url)
 
 	select {
 	case err := <-errc:

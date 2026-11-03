@@ -8,6 +8,8 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+
+	"github.com/backpaper0/passui/internal/secret"
 )
 
 //go:embed templates/*.html
@@ -22,19 +24,23 @@ var templates = template.Must(template.ParseFS(templateFS, "templates/*.html"))
 type Config struct {
 	// Port は待ち受けるポート。許可する Host ヘッダの組み立てに使う。
 	Port int
+	// Token はログイン トークン。serve が起動ごとに作る。空ならログインできない。
+	Token secret.Value
 }
 
-// New は passui の http.Handler を返す。すべてのルートに共通のミドルウェアが掛かる。
+// New は passui の http.Handler を返す。すべてのルートに共通のミドルウェアが掛かり、
+// /login と /static/ 以外のルートにはログインが要る。
 func New(cfg Config, logger *slog.Logger) http.Handler {
-	s := &handler{cfg: cfg, logger: logger}
+	s := &handler{cfg: cfg, logger: logger, sessions: newSessions()}
 	mux := http.NewServeMux()
 	s.routes(mux)
-	return Middleware(cfg, logger, mux)
+	return Middleware(cfg, logger, s.requireSession(mux))
 }
 
 type handler struct {
-	cfg    Config
-	logger *slog.Logger
+	cfg      Config
+	logger   *slog.Logger
+	sessions *sessions
 }
 
 // routes にルートを登録する。以降のチケットはここに足す。
@@ -45,6 +51,8 @@ func (s *handler) routes(mux *http.ServeMux) {
 	}
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	mux.HandleFunc("GET /{$}", s.top)
+	mux.HandleFunc("GET /login", s.login)
+	mux.HandleFunc("POST /logout", s.logout)
 }
 
 func (s *handler) top(w http.ResponseWriter, r *http.Request) {
