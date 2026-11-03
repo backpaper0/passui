@@ -161,6 +161,25 @@ func (f *FakeStore) Create(ctx context.Context, name string, content secret.Valu
 	return nil
 }
 
+// Update は store.Pass.Update と同じ確認をしてからエントリを書き換える。「暗号文」は
+// 書かれた本文（末尾に改行が付いたもの）そのものにする。
+func (f *FakeStore) Update(ctx context.Context, e store.Edit) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return f.err
+	}
+	c, ok := f.entries[e.Name]
+	if !ok {
+		return fmt.Errorf("update %s: %w: %w", e.Name, store.ErrConflict, store.ErrNotFound)
+	}
+	if sum := sha256.Sum256([]byte(c)); e.Hash == "" || hex.EncodeToString(sum[:]) != e.Hash {
+		return fmt.Errorf("update %s: %w", e.Name, store.ErrConflict)
+	}
+	f.entries[e.Name] = store.WithTrailingNewline(e.Content.Reveal())
+	return nil
+}
+
 // Content はエントリの「暗号文」を返す。Create で作ったエントリなら、書かれた本文。
 func (f *FakeStore) Content(name string) (string, bool) {
 	f.mu.Lock()

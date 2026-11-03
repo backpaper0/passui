@@ -43,6 +43,10 @@ type Backend interface {
 	// 名前が正しくなければ ErrInvalidName、末尾が "/" か同名のディレクトリがあれば
 	// ErrIsDirectory、同じ名前のエントリがあれば ErrExists を返し、ストアを変えない。
 	Create(ctx context.Context, name string, content secret.Value) error
+	// Update は既存のエントリ e.Name の本文を書き換える（pass insert -m -f）。暗号化だけなので
+	// ロック中でも書ける。今の暗号文のハッシュが e.Hash と違えば ErrConflict、エントリが
+	// 消えていれば ErrConflict と ErrNotFound の両方を返し、ストアを変えない（作り直さない）。
+	Update(ctx context.Context, e Edit) error
 	// Delete はエントリ name を消す（pass rm -f）。復号しないのでロック中でも消せる。
 	// エントリがなければ ErrNotFound を返す。
 	Delete(ctx context.Context, name string) error
