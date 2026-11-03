@@ -20,6 +20,7 @@ type FakeStore struct {
 	mu      sync.Mutex
 	entries map[string]string
 	err     error
+	moveErr error
 	locked  bool
 }
 
@@ -146,16 +147,8 @@ func (f *FakeStore) Create(ctx context.Context, name string, content secret.Valu
 	if f.err != nil {
 		return f.err
 	}
-	if err := store.CheckNewName(name); err != nil {
+	if err := f.checkDestination(name); err != nil {
 		return fmt.Errorf("create %s: %w", name, err)
-	}
-	for n := range f.entries {
-		if strings.HasPrefix(n, name+"/") {
-			return fmt.Errorf("create %s: %w", name, store.ErrIsDirectory)
-		}
-	}
-	if _, ok := f.entries[name]; ok {
-		return fmt.Errorf("create %s: %w", name, store.ErrExists)
 	}
 	f.entries[name] = store.WithTrailingNewline(content.Reveal())
 	return nil
@@ -176,7 +169,45 @@ func (f *FakeStore) Update(ctx context.Context, e store.Edit) error {
 	if sum := sha256.Sum256([]byte(c)); e.Hash == "" || hex.EncodeToString(sum[:]) != e.Hash {
 		return fmt.Errorf("update %s: %w", e.Name, store.ErrConflict)
 	}
+	if e.Moves() {
+		if err := f.checkDestination(e.NewName); err != nil {
+			return fmt.Errorf("move %s: %w", e.Name, err)
+		}
+	}
 	f.entries[e.Name] = store.WithTrailingNewline(e.Content.Reveal())
+	if !e.Moves() {
+		return nil
+	}
+	if f.moveErr != nil {
+		return fmt.Errorf("move %s to %s: %w: %w", e.Name, e.NewName, store.ErrMoveFailed, f.moveErr)
+	}
+	f.entries[e.NewName] = f.entries[e.Name]
+	delete(f.entries, e.Name)
+	return nil
+}
+
+// SetMoveErr を nil 以外にすると、以降の Update の移動（pass mv）だけが失敗する
+// （本文は元のパスに保存され、store.ErrMoveFailed と err を包んだエラーを返す）。
+func (f *FakeStore) SetMoveErr(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.moveErr = err
+}
+
+// checkDestination は store.Pass と同じ規則で、新しいエントリ name を置けるかを確かめる。
+// f.mu を持って呼ぶこと。
+func (f *FakeStore) checkDestination(name string) error {
+	if err := store.CheckNewName(name); err != nil {
+		return err
+	}
+	for n := range f.entries {
+		if strings.HasPrefix(n, name+"/") {
+			return store.ErrIsDirectory
+		}
+	}
+	if _, ok := f.entries[name]; ok {
+		return store.ErrExists
+	}
 	return nil
 }
 

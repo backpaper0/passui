@@ -5,7 +5,9 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -189,5 +191,102 @@ func TestIntegrationOpenEditWhileLockedShowsUnlockGuide(t *testing.T) {
 	}
 	if strings.Contains(body, password) || strings.Contains(body, "<textarea") {
 		t.Errorf("locked response contains the entry or the form:\n%s", body)
+	}
+}
+
+// 競合 4: パスを変えて保存すると移動・リネームになる。古いパスは消え、新しいパスに
+// 中身がある（宛先のフォルダは pass が作る）。
+func TestIntegrationEditWithNewPathMovesEntry(t *testing.T) {
+	h := passuitest.New(t)
+	g := passuitest.NewGPGStore(h)
+	g.Insert("email/work", h.Canary("old"))
+	g.Unlock()
+	srv := h.Serve(passuitest.Options{Store: g.Backend()})
+	hash := openEditHash(t, srv, "email/work")
+	content := h.Canary("password")
+
+	res := postEdit(srv, "email/work", url.Values{"path": {"archive/email/work"}, "hash": {hash}, "content": {content}})
+
+	body := readBody(t, res)
+	if res.StatusCode != http.StatusOK || !strings.Contains(body, `data-entry="archive/email/work"`) {
+		t.Fatalf("status = %d, want 200 with the moved entry:\n%s", res.StatusCode, body)
+	}
+	if res.Header.Get("HX-Trigger") != "tree-changed" {
+		t.Errorf("tree is not reloaded")
+	}
+	if got := g.Show("archive/email/work"); got != content+"\n" {
+		t.Errorf("pass show new path = %q, want %q", got, content+"\n")
+	}
+	if _, ok := snapshot(t, g.Dir)["email/work.gpg"]; ok {
+		t.Errorf("old entry still exists")
+	}
+}
+
+// 競合 3: 移動の宛先にエントリか同名のディレクトリがある（末尾が / のときも）と
+// エラーになり、どちらのエントリも変わらない（上書きする手段は持たない）。
+func TestIntegrationEditMoveToTakenDestinationIsRejectedAndKeepsStore(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, message string
+	}{
+		{"existing entry", "email/personal", "同じ名前のエントリが既にあります"},
+		{"directory with the same name", "email", "同じ名前のフォルダがあります"},
+		{"trailing slash", "archive/", "パスの末尾が / です"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := passuitest.New(t)
+			g := passuitest.NewGPGStore(h)
+			work, personal := h.Canary("work"), h.Canary("personal")
+			g.Insert("email/work", work)
+			g.Insert("email/personal", personal)
+			g.Unlock()
+			srv := h.Serve(passuitest.Options{Store: g.Backend()})
+			hash := openEditHash(t, srv, "email/work")
+			before := snapshot(t, g.Dir)
+			input := h.Canary("input")
+
+			res := postEdit(srv, "email/work", url.Values{"path": {tc.path}, "hash": {hash}, "content": {input}})
+
+			body := readBody(t, res)
+			if res.StatusCode != http.StatusConflict || !strings.Contains(body, tc.message) || !strings.Contains(body, input) {
+				t.Errorf("status = %d, want 409 with %q and the input kept:\n%s", res.StatusCode, tc.message, body)
+			}
+			if after := snapshot(t, g.Dir); !maps.Equal(before, after) {
+				t.Errorf("store changed:\nbefore %v\nafter  %v", before, after)
+			}
+			if got := g.Show("email/work"); got != work {
+				t.Errorf("edited entry changed: %q", got)
+			}
+			if got := g.Show("email/personal"); got != personal {
+				t.Errorf("destination entry changed: %q", got)
+			}
+		})
+	}
+}
+
+// mv だけが失敗する（宛先の途中の要素がフォルダでなくファイル）と、内容は元のパスに
+// 保存され、そのことが伝わる。
+func TestIntegrationEditMoveFailureKeepsSavedContentAtOldPath(t *testing.T) {
+	h := passuitest.New(t)
+	g := passuitest.NewGPGStore(h)
+	g.Insert("bank", h.Canary("old"))
+	g.Unlock()
+	if err := os.WriteFile(filepath.Join(g.Dir, "blocker"), []byte("not a folder"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv := h.Serve(passuitest.Options{Store: g.Backend()})
+	hash := openEditHash(t, srv, "bank")
+	input := h.Canary("input")
+
+	res := postEdit(srv, "bank", url.Values{"path": {"blocker/bank"}, "hash": {hash}, "content": {input}})
+
+	body := readBody(t, res)
+	if !strings.Contains(body, "移動に失敗しました") || !strings.Contains(body, input) {
+		t.Errorf("status = %d, want the move failure with the input kept:\n%s", res.StatusCode, body)
+	}
+	if got := g.Show("bank"); got != input+"\n" {
+		t.Errorf("content is not saved at the old path: %q", got)
+	}
+	if m := hashField.FindStringSubmatch(body); m == nil || m[1] == hash {
+		t.Errorf("hash in the form is not the saved version:\n%s", body)
 	}
 }

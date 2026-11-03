@@ -19,7 +19,7 @@ func editURL(name string) string {
 type editData struct {
 	// Name は元のパス（URL のパス）。保存はこのエントリに対して行う。
 	Name string
-	// Path はパス欄の値。#34 では Name と同じ（パスの変更は #35）。
+	// Path はパス欄の値。Name と違えば、保存で移動・リネームになる。
 	Path string
 	// Content は本文の textarea の値（平文なのでログに出さない）。
 	Content string
@@ -83,34 +83,63 @@ func (s *handler) saveEdit(w http.ResponseWriter, r *http.Request) {
 		expected = overwrite
 	}
 	switch {
+	case data.Path == "":
+		data.Failure = "パスを入力してください"
+		s.render(w, r, http.StatusBadRequest, "edit.html", data)
+		return
 	case data.Content == "":
 		data.Failure = "本文を入力してください"
 		s.render(w, r, http.StatusBadRequest, "edit.html", data)
 		return
-	case data.Path != data.Name:
-		// TODO(#35): パスを変えたら移動・リネームにする。
-		data.Failure = "パスは変更できません"
-		s.render(w, r, http.StatusBadRequest, "edit.html", data)
-		return
 	}
 
-	err := s.cfg.Store.Update(r.Context(), store.Edit{
+	// パス欄を変えていれば移動・リネーム（元のパスに保存してから mv する）。
+	e := store.Edit{
 		Name:    data.Name,
+		NewName: data.Path,
 		Hash:    expected,
 		Content: secret.Of(data.Content),
-	})
-	if err != nil {
+	}
+	if err := s.cfg.Store.Update(r.Context(), e); err != nil {
 		s.editFailure(w, r, data, err)
 		return
 	}
 	s.logOperation(r, "edit", data.Name)
-	s.showEntry(w, r, data.Name, "エントリを保存しました。")
+	if !e.Moves() {
+		s.showEntry(w, r, data.Name, "エントリを保存しました。")
+		return
+	}
+	s.logger.InfoContext(r.Context(), "operation", "op", "move", "entry", data.Name, "to", data.Path)
+	triggerTreeReload(w)
+	s.showEntry(w, r, data.Path, "エントリを保存し、"+data.Path+" に移動しました。")
+}
+
+// moveFailure は、本文は元のパスに保存できたが移動だけが失敗したことを、入力を残した
+// フォームで伝える。保存で暗号文が変わったので、ハッシュを今のものにしておく（もう一度
+// 「保存」を押すと移動をやり直せる）。ツリーは読み直させる。
+func (s *handler) moveFailure(w http.ResponseWriter, r *http.Request, data editData, err error) {
+	id := logFailure(r.Context(), s.logger, "move entry", "entry", data.Name, "to", data.Path, "err", err)
+	data.Failure = "内容は " + data.Name + " に保存しましたが、" + data.Path +
+		" への移動に失敗しました（エラー ID: " + id + "）。エントリは元のパスのままです"
+	data.Hash = ""
+	if current, herr := s.cfg.Store.Hash(r.Context(), data.Name); herr == nil {
+		data.Hash = current
+	}
+	triggerTreeReload(w)
+	s.render(w, r, http.StatusInternalServerError, "edit.html", data)
 }
 
 // editFailure は保存の失敗を、入力を残したフォームで返す。
 func (s *handler) editFailure(w http.ResponseWriter, r *http.Request, data editData, err error) {
+	if errors.Is(err, store.ErrMoveFailed) {
+		s.moveFailure(w, r, data, err)
+		return
+	}
 	if !errors.Is(err, store.ErrConflict) {
 		status, msg := s.storeFailure(r, err, "save entry", "entry", data.Name)
+		if errors.Is(err, store.ErrIsDirectory) && strings.HasSuffix(data.Path, "/") {
+			msg = "パスの末尾が / です。エントリの名前まで入力してください"
+		}
 		data.Failure = msg
 		s.render(w, r, status, "edit.html", data)
 		return

@@ -211,8 +211,8 @@ func TestSaveEditRejectsBadInput(t *testing.T) {
 		name, path, content, message string
 	}{
 		{"empty content", "bank", "", "本文を入力してください"},
-		// パスの変更（移動・リネーム）は #35。
-		{"changed path", "bank2", "x", "パスは変更できません"},
+		{"empty path", "", "x", "パスを入力してください"},
+		{"invalid path", "../bank", "x", "パスが正しくありません"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := passuitest.NewFakeStore("bank")
@@ -230,6 +230,99 @@ func TestSaveEditRejectsBadInput(t *testing.T) {
 				t.Errorf("entry changed: %q", got)
 			}
 		})
+	}
+}
+
+func TestSaveEditWithNewPathMovesEntryAndReloadsTree(t *testing.T) {
+	h := passuitest.New(t)
+	fake := passuitest.NewFakeStore("email/other")
+	fake.Put("email/work", "old\n")
+	srv := h.Serve(passuitest.Options{Store: fake})
+	input := h.Canary("input")
+
+	res := postEdit(srv, "email/work", url.Values{"path": {"archive/work"}, "hash": {sha("old\n")}, "content": {input}})
+
+	body := readBody(t, res)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200:\n%s", res.StatusCode, body)
+	}
+	for _, want := range []string{"archive/work に移動しました", `data-entry="archive/work"`, `id="selected-entry" name="selected" value="archive/work"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body does not contain %q:\n%s", want, body)
+		}
+	}
+	if res.Header.Get("HX-Trigger") != "tree-changed" {
+		t.Errorf("tree is not reloaded")
+	}
+	if got, _ := fake.Content("archive/work"); got != input+"\n" {
+		t.Errorf("moved content = %q", got)
+	}
+	if _, ok := fake.Content("email/work"); ok {
+		t.Errorf("old entry still exists")
+	}
+	if !strings.Contains(h.Logs(), "op=move entry=email/work to=archive/work") {
+		t.Errorf("no move log:\n%s", h.Logs())
+	}
+}
+
+func TestSaveEditMoveToTakenDestinationIsRejected(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, message string
+	}{
+		{"existing entry", "email/other", "同じ名前のエントリが既にあります"},
+		{"directory with the same name", "email", "同じ名前のフォルダがあります"},
+		{"trailing slash", "archive/", "パスの末尾が / です"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := passuitest.NewFakeStore("email/other")
+			fake.Put("bank", "old\n")
+			srv := passuitest.New(t).Serve(passuitest.Options{Store: fake})
+
+			res := postEdit(srv, "bank", url.Values{"path": {tc.path}, "hash": {sha("old\n")}, "content": {"new"}})
+
+			body := readBody(t, res)
+			if res.StatusCode != http.StatusConflict || !strings.Contains(body, tc.message) {
+				t.Errorf("status = %d, want 409 with %q:\n%s", res.StatusCode, tc.message, body)
+			}
+			if got, _ := fake.Content("bank"); got != "old\n" {
+				t.Errorf("entry changed: %q", got)
+			}
+			if got, _ := fake.Content("email/other"); got != "ciphertext of email/other" {
+				t.Errorf("destination changed: %q", got)
+			}
+		})
+	}
+}
+
+// mv だけが失敗した: 内容は元のパスに保存できたことと、移動に失敗したことを伝える。
+// 原因（stderr）は出さず、エラー ID だけ。フォームのハッシュは保存した版にする。
+func TestSaveEditMoveFailureSaysContentWasSavedButNotMoved(t *testing.T) {
+	h := passuitest.New(t)
+	fake := passuitest.NewFakeStore()
+	fake.Put("bank", "old\n")
+	fake.SetMoveErr(errors.New("pass mv: STDERR-DETAIL"))
+	srv := h.Serve(passuitest.Options{Store: fake})
+	input := h.Canary("input")
+
+	res := postEdit(srv, "bank", url.Values{"path": {"money/bank"}, "hash": {sha("old\n")}, "content": {input}})
+
+	body := readBody(t, res)
+	for _, want := range []string{"内容は bank に保存しましたが、money/bank への移動に失敗しました（エラー ID: ", input, `name="hash" value="` + sha(input+"\n") + `"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body does not contain %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "STDERR-DETAIL") {
+		t.Errorf("body leaks the error:\n%s", body)
+	}
+	if res.Header.Get("HX-Trigger") != "tree-changed" {
+		t.Errorf("tree is not reloaded")
+	}
+	if got, _ := fake.Content("bank"); got != input+"\n" {
+		t.Errorf("content at the old path = %q", got)
+	}
+	if _, ok := fake.Content("money/bank"); ok {
+		t.Errorf("entry was moved")
 	}
 }
 
