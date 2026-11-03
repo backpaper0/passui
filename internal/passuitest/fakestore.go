@@ -127,6 +127,17 @@ func (f *FakeStore) Locked(ctx context.Context) (bool, error) {
 	return f.locked, nil
 }
 
+// Lock はロック状態にする（SetLocked(true) と同じ）。
+func (f *FakeStore) Lock(ctx context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return f.err
+	}
+	f.locked = true
+	return nil
+}
+
 // Create は store.Pass.Create と同じ確認をしてからエントリを置く。「暗号文」は
 // ストアに書かれる本文（末尾に改行が付いたもの）そのものにする（Content で読める）。
 func (f *FakeStore) Create(ctx context.Context, name string, content secret.Value) error {

@@ -1,0 +1,8 @@
+{{define "lock-button"}}<!-- ロックは gpg-agent のキャッシュを消す。ログインは続く。右ペイン（詳細や編集中の入力）は確認なしで破棄する。
+     JS がなければ普通の POST になり、/ に戻る。 -->
+<form class="lock-form" method="post" action="/lock"
+      hx-post="/lock" hx-target="#right-pane" hx-swap="innerHTML">
+<button type="submit" aria-describedby="lock-note">ロック</button>
+<small id="lock-note" class="lock-note">ターミナルの pass もロックされます</small>
+</form>
+{{end}}
