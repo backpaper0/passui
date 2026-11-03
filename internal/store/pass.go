@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -38,6 +39,9 @@ type PassConfig struct {
 type Pass struct {
 	cfg    PassConfig
 	logger *slog.Logger
+	// writeMu は書き込みの mutex（write.go の write）。serve は Pass を 1 つだけ作るので、
+	// プロセス全体で 1 つになる。
+	writeMu sync.Mutex
 }
 
 var _ Backend = (*Pass)(nil)

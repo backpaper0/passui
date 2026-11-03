@@ -29,6 +29,8 @@ func (s *handler) storeFailure(r *http.Request, err error, op string, attrs ...a
 		return http.StatusConflict, "同じ名前のフォルダがあります"
 	case errors.Is(err, store.ErrConflict):
 		return http.StatusConflict, "エントリがほかで変更されています"
+	case errors.Is(err, store.ErrInvalidName):
+		return http.StatusBadRequest, "パスが正しくありません（空の要素や . で始まる要素は使えません）"
 	}
 	id := logFailure(r.Context(), s.logger, op, append(attrs, "err", err)...)
 	return http.StatusInternalServerError, failureMessage(id)
