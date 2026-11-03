@@ -27,11 +27,17 @@ const help = `passui - password-store をブラウザから管理する Web ツ�
 サブコマンド:
   serve     サーバーを起動する（127.0.0.1 で待ち受ける）
   login     動いている passui のログイン URL を表示する
+  install-service
+            systemd ユーザーサービスとして登録して起動し、ログイン URL を表示する
+            （何度実行してもよい。passui を更新した後にも実行する）
+  uninstall-service
+            サービスを止めて登録を取り除く
   version   バージョンを表示する
 
 設定（環境変数）:
   PASSUI_PORT       待ち受けるポート（既定: 3560）
   PASSUI_LOG_LEVEL  info または debug（既定: info）
+  サービスでは ~/.config/passui/env に KEY=VALUE で書く。
 `
 
 // Run は passui を実行して終了コードを返す。env は "KEY=VALUE" の一覧で、
@@ -52,6 +58,10 @@ func Run(ctx context.Context, args []string, env []string, stdout, stderr io.Wri
 		return serve(ctx, parseEnviron(env), stderr)
 	case "login":
 		return login(parseEnviron(env), stdout, stderr)
+	case "install-service":
+		return installService(ctx, parseEnviron(env), stdout, stderr)
+	case "uninstall-service":
+		return uninstallService(ctx, parseEnviron(env), stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "passui: 不明なサブコマンドです: %s\n\n%s", args[0], help)
 		return 2
