@@ -280,4 +280,3 @@ func (p *Pass) decrypt(ctx context.Context, op, name string, call func() error) 
 	}
 	return err
 }
-
