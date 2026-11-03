@@ -21,6 +21,7 @@ var staticFS embed.FS
 
 var templates = template.Must(template.New("").Funcs(template.FuncMap{
 	"entryURL": entryURL,
+	"editURL":  editURL,
 }).ParseFS(templateFS, "templates/*.html"))
 
 // Config は Handler の設定である。
@@ -63,6 +64,8 @@ func (s *handler) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /lock-status", s.lockStatus)
 	mux.HandleFunc("GET /new", s.newEntryForm)
 	mux.HandleFunc("POST /new", s.createEntry)
+	mux.HandleFunc("GET /edit/{name...}", s.editForm)
+	mux.HandleFunc("POST /edit/{name...}", s.saveEdit)
 }
 
 type indexData struct {
