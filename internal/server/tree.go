@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/backpaper0/passui/internal/store"
 )
@@ -30,7 +31,12 @@ func (s *handler) loadTree(r *http.Request) (treeData, int) {
 }
 
 // tree は GET /tree。左ペインのツリーだけを返す（htmx で差し替える）。
+// 検索語 q が空でなければ、ツリーの代わりに検索結果を返す（search.go）。
 func (s *handler) tree(w http.ResponseWriter, r *http.Request) {
+	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
+		s.search(w, r, q)
+		return
+	}
 	data, status := s.loadTree(r)
 	s.render(w, r, status, "tree.html", data)
 }

@@ -1,0 +1,8 @@
+{{if .Failure}}<p class="error" role="alert">{{.Failure}}</p>
+{{else if not .Results}}<p class="placeholder">一致するエントリがありません。</p>
+{{else}}<ul class="search-results">
+{{- range .Results}}
+<li class="entry" data-entry="{{.Path}}">{{range .Parts}}{{if .Match}}<mark>{{.Text}}</mark>{{else}}{{.Text}}{{end}}{{end}}</li>
+{{- end}}
+</ul>
+{{end}}
