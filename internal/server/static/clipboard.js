@@ -110,14 +110,15 @@
     clearClipboard(false);
   });
 
-  // 「表示」中の input を伏せ字に戻す。ボタンの表記は passui.js の toggleReveal と揃える。
+  // 「表示」中の input を伏せ字に戻す。ボタンのラベルは passui.js の setRevealLabel と揃える。
   function maskAll() {
     var buttons = document.querySelectorAll('[data-reveal][aria-pressed="true"]');
     Array.prototype.forEach.call(buttons, function (button) {
       var input = document.querySelector(button.dataset.reveal);
       if (input) input.type = "password";
       button.setAttribute("aria-pressed", "false");
-      button.textContent = "表示";
+      button.setAttribute("aria-label", "表示");
+      button.setAttribute("title", "表示");
     });
   }
 

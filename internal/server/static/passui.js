@@ -11,8 +11,34 @@
     var reveal = input.type === "password";
     input.type = reveal ? "text" : "password";
     button.setAttribute("aria-pressed", reveal ? "true" : "false");
-    button.textContent = reveal ? "隠す" : "表示";
+    setRevealLabel(button, reveal ? "隠す" : "表示");
   }
+
+  // 表示ボタンはアイコンだけなので、ラベルは aria-label と title に持つ。
+  // アイコンは aria-pressed から CSS が選ぶ。伏せ字に戻すときは clipboard.js の maskAll も同じことをする。
+  function setRevealLabel(button, label) {
+    button.setAttribute("aria-label", label);
+    button.setAttribute("title", label);
+  }
+
+  // ツリー（または検索結果）で、右ペインに出しているエントリに aria-current を付ける。
+  // 右ペインの直下の [data-entry]（詳細、ロック中、編集、削除の確認）がそのエントリ。
+  function markSelected() {
+    var shown = document.querySelector("#right-pane > [data-entry]");
+    var name = shown ? shown.getAttribute("data-entry") : null;
+    var links = document.querySelectorAll("#tree .entry > .entry-link");
+    Array.prototype.forEach.call(links, function (link) {
+      if (name !== null && link.parentElement.getAttribute("data-entry") === name) {
+        link.setAttribute("aria-current", "true");
+      } else {
+        link.removeAttribute("aria-current");
+      }
+    });
+  }
+
+  // 右ペインとツリーのどちらが差し替わっても付け直す。
+  document.addEventListener("htmx:afterSettle", markSelected);
+  document.addEventListener("DOMContentLoaded", markSelected);
 
   // 「コピー」: data-copy="<セレクタ>" の要素の文字列をクリップボードに入れる。
   // シークレットではない文字列（解錠のワンライナーなど）に使う。
