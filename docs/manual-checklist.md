@@ -4,7 +4,7 @@
 
 ## いつ通すか
 
-- 次のどれかを変えたリリースでは、**OrbStack（公用: macOS + OrbStack）と WSL2（私用: Windows + WSL2）の両方で**すべての項目を通す。
+- 次のどれかを変えたリリースでは、**OrbStack（私用: macOS + OrbStack）と WSL2（公用: Windows + WSL2）の両方で**すべての項目を通す。
   - ログイン（ログイン URL とトークン、セッション Cookie、ログアウト、Origin の検証）
   - Host の検証
   - unit の生成（`install-service` / `uninstall-service`）

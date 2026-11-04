@@ -25,12 +25,12 @@ passui は、ゲスト上の password-store（`pass` のストア）をホスト
 - linger: ログインしていなくても passui を起動しておくため。`loginctl enable-linger`
 - `gpg-agent.socket` の有効化: passui を再起動したときに、ターミナルの `pass` までロックされないようにするため。`systemctl --user enable gpg-agent.socket`
 
-### 公用: macOS + OrbStack
+### 私用: macOS + OrbStack
 
 - ゲストは OrbStack の Linux マシン（Apple シリコンなら arm64）です。systemd は既定で動いています。
 - ホストのブラウザから `http://passui.localhost:3560` に届きます（OrbStack がゲストのポートを Mac の `localhost` に転送します）。
 
-### 私用: Windows + WSL2
+### 公用: Windows + WSL2
 
 - ゲストは WSL2 のディストリビューション（amd64）です。
 - systemd が動いていなければ、ゲストの `/etc/wsl.conf` に次を書き、Windows 側で `wsl --shutdown` してから開き直します。
