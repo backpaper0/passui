@@ -34,11 +34,15 @@
 
   --radius-s: 6px;
   --radius-m: 10px;
+  --shadow-card: 0 1px 2px rgb(29 31 44 / 0.06), 0 4px 16px rgb(29 31 44 / 0.06);
   --shadow-float: 0 1px 2px rgb(29 31 44 / 0.08), 0 8px 24px rgb(29 31 44 / 0.14);
 
   --icon-logo: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill-rule='evenodd' d='M12 2.2 4 5.3v6.2c0 5 3.4 9.3 8 10.3 4.6-1 8-5.3 8-10.3V5.3L12 2.2ZM12 7.6a2.6 2.6 0 0 0-1.3 4.85V16h2.6v-3.55A2.6 2.6 0 0 0 12 7.6Z'/%3E%3C/svg%3E");
   --icon-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 6 6 6-6 6'/%3E%3C/svg%3E");
   --icon-folder: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linejoin='round'%3E%3Cpath d='M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z'/%3E%3C/svg%3E");
+  --icon-eye: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E");
+  --icon-eye-off: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10.6 5.1A10.7 10.7 0 0 1 12 5c6.4 0 10 7 10 7a17.6 17.6 0 0 1-2.9 3.8M6.6 6.6C3.9 8.4 2 12 2 12s3.6 7 10 7a9.8 9.8 0 0 0 5.4-1.6'/%3E%3Cpath d='M9.9 9.9a3 3 0 0 0 4.2 4.2M3 3l18 18'/%3E%3C/svg%3E");
+  --icon-copy: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linejoin='round'%3E%3Crect x='8' y='8' width='12' height='12' rx='2'/%3E%3Cpath d='M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2'/%3E%3C/svg%3E");
   --icon-key: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='8' cy='15' r='4'/%3E%3Cpath d='m11 12 9-9M17 6l2 2M15 8l2 2'/%3E%3C/svg%3E");
 }
 
@@ -105,6 +109,43 @@ button.danger:hover,
   border-color: var(--danger-hover);
 }
 
+/* アイコンだけのボタン。ラベルは aria-label と title に持つ。 */
+.icon-button {
+  width: 2rem;
+  min-height: 2rem;
+  padding: 0;
+  color: var(--ink-muted);
+}
+.icon-button::before {
+  content: "";
+  width: 1.0625rem;
+  height: 1.0625rem;
+  background-color: currentColor;
+  mask: var(--icon) center / contain no-repeat;
+}
+.icon-button:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.icon-copy { --icon: var(--icon-copy); }
+.icon-reveal { --icon: var(--icon-eye); }
+.icon-reveal[aria-pressed="true"] { --icon: var(--icon-eye-off); color: var(--accent); }
+
+/* ロゴ（ヘッダーと単独ページ） */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.brand::before {
+  content: "";
+  width: 1.375rem;
+  height: 1.375rem;
+  background-color: var(--accent);
+  mask: var(--icon-logo) center / contain no-repeat;
+}
+
 /* ---- ヘッダー ---- */
 .header {
   display: flex;
@@ -114,22 +155,6 @@ button.danger:hover,
   padding: 0.625rem 1rem;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
-}
-.header h1 {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-}
-.header h1::before {
-  content: "";
-  width: 1.375rem;
-  height: 1.375rem;
-  background-color: var(--accent);
-  mask: var(--icon-logo) center / contain no-repeat;
 }
 .header form { margin: 0; }
 .header .badge { margin-right: auto; }
@@ -265,6 +290,9 @@ button.danger:hover,
   mask: var(--icon-key) center / contain no-repeat;
 }
 .entry-link:hover { background: var(--surface-hover); }
+/* 右ペインに出しているエントリ（passui.js が aria-current を付ける） */
+.entry-link[aria-current="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.entry-link[aria-current="true"]::before { background-color: var(--accent); }
 /* ツリーのエントリは、フォルダの名前（シェブロンの右）と頭を揃える。 */
 .tree .entry > .entry-link { padding-left: 1.5rem; }
 #tree > .tree > .entry > .entry-link { padding-left: 0.375rem; }
@@ -376,6 +404,39 @@ button.danger:hover,
 .entry-form > button, .entry-form > .actions { justify-self: start; margin-top: 0.5rem; }
 .hint { margin: 0; color: var(--ink-muted); font-size: 0.75rem; }
 .hint code { padding: 0.0625rem 0.25rem; border-radius: 4px; background: var(--surface-sunk); }
+
+/* ---- 単独ページ（ログインの案内） ---- */
+body.standalone {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 1rem;
+  background: var(--surface-sunk);
+}
+.standalone-card {
+  display: grid;
+  gap: 0.875rem;
+  width: 100%;
+  max-width: 28rem;
+  padding: 1.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+.standalone-card .brand { font-size: 1.25rem; }
+.standalone-card .brand::before { width: 1.625rem; height: 1.625rem; }
+.standalone-card h2 { margin: 0; font-size: 1rem; }
+.standalone-card p { margin: 0; color: var(--ink-muted); }
+.standalone-card p code { padding: 0.0625rem 0.25rem; border-radius: 4px; background: var(--surface-sunk); color: var(--ink); }
+.standalone-card pre {
+  margin: 0;
+  padding: 0.625rem 0.75rem;
+  border-radius: var(--radius-s);
+  background: var(--code-bg);
+  color: var(--code-ink);
+  overflow-x: auto;
+}
 
 /* ---- コピー後のクリップボードのクリアの状態（clipboard.js が body に足す） ---- */
 .clipboard-status {

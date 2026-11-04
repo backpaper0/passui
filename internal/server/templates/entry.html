@@ -12,14 +12,14 @@
 <div class="password-row">
 <label for="entry-password">パスワード</label>
 <input id="entry-password" class="secret" type="password" value="{{.Password}}" readonly autocomplete="off" spellcheck="false">
-<button type="button" data-reveal="#entry-password" aria-pressed="false">表示</button>
-<button type="button" data-copy-secret>コピー</button>
+<button type="button" class="icon-button icon-reveal" data-reveal="#entry-password" aria-pressed="false" aria-label="表示" title="表示"></button>
+<button type="button" class="icon-button icon-copy" data-copy-secret aria-label="パスワードをコピー" title="コピー"></button>
 </div>
 {{- if .Fields}}
 <dl class="fields">
 {{- range .Fields}}
 {{- if .Key}}
-<div class="field"><dt>{{.Key}}</dt><dd>{{.Value}}</dd><button type="button" data-copy-secret>コピー</button></div>
+<div class="field"><dt>{{.Key}}</dt><dd>{{.Value}}</dd><button type="button" class="icon-button icon-copy" data-copy-secret aria-label="{{.Key}} をコピー" title="コピー"></button></div>
 {{- else}}
 <div class="field"><dd class="line">{{.Value}}</dd></div>
 {{- end}}
