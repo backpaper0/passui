@@ -1,9 +1,36 @@
-/* パスワード生成（#33）。新規作成フォームは選んだ作り方の欄だけを出す。 */
-.new-mode { display: flex; gap: 1rem; border: none; padding: 0; margin: 0; }
-.new-mode legend { padding: 0; margin-bottom: 0.25rem; }
-.new-mode label, .generate-fields .checkbox { display: inline-flex; align-items: center; gap: 0.25rem; }
-.entry-form .new-mode input, .generate-fields .checkbox input { width: auto; }
+/* パスワード生成（#33）。新規作成フォームは選んだ作り方の欄だけを出す。色は passui.css のトークンから取る。 */
+.new-mode {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0;
+  justify-self: start;
+  margin: 0.375rem 0 0;
+  padding: 0;
+  border: none;
+}
+.new-mode legend { padding: 0; margin-bottom: 0.375rem; font-size: 0.8125rem; font-weight: 600; }
+/* ラジオボタンはセグメント状の切り替えに見せる。 */
+.new-mode label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.3125rem 0.875rem;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+.new-mode label:first-of-type { border-radius: var(--radius-s) 0 0 var(--radius-s); }
+.new-mode label:last-of-type { border-radius: 0 var(--radius-s) var(--radius-s) 0; border-left: none; }
+.new-mode label:has(input:checked) { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.new-mode label:last-of-type:has(input:checked) { border-left: 1px solid var(--accent); margin-left: -1px; }
+.new-mode label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.entry-form .new-mode input { width: auto; margin: 0; accent-color: var(--accent); }
+
+.generate-fields .checkbox { display: inline-flex; align-items: center; gap: 0.375rem; font-size: 0.8125rem; }
+.generate-fields .checkbox input { width: auto; margin: 0; accent-color: var(--accent); }
 .generate-fields, .manual-fields { display: grid; gap: 0.5rem; }
+.manual-fields > label { margin-top: 0.375rem; font-size: 0.8125rem; font-weight: 600; }
 .generate-fields input[type="number"] { max-width: 10rem; }
 .entry-form:has(input[name="mode"][value="generate"]:checked) .manual-fields { display: none; }
 .entry-form:not(:has(input[name="mode"][value="generate"]:checked)) .generate-fields { display: none; }
