@@ -261,3 +261,17 @@ func TestBackupLogsNumberOfStoreKeys(t *testing.T) {
 		t.Errorf("logs lack the number of store keys:\n%s", logs)
 	}
 }
+
+func TestBackupLogsNumberOfStoreKeysWithSecretKey(t *testing.T) {
+	h := passuitest.New(t)
+	fake := &fakeBackup{sum: backup.Summary{Path: backupPath, Keys: []string{"AAAA", "BBBB"}, SecretKeys: 1}}
+	srv := h.Serve(passuitest.Options{Backup: fake.Backup})
+
+	if res, body := postBackup(t, srv, true); res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d:\n%s", res.StatusCode, body)
+	}
+
+	if logs := h.Logs(); !strings.Contains(logs, "op=backup") || !strings.Contains(logs, "secret_keys=1") {
+		t.Errorf("logs lack the number of store keys with a secret key:\n%s", logs)
+	}
+}

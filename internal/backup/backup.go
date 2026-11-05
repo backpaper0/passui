@@ -15,6 +15,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sync"
 	"syscall"
 	"text/template"
@@ -48,6 +49,8 @@ type Summary struct {
 	SkippedSpecialFiles int
 	// Keys はストアの鍵（主鍵の指紋）。ログには数を出し、指紋は debug のときだけ出す。
 	Keys []string
+	// SecretKeys は、秘密鍵（.key）を入れたストアの鍵の数。keygrip はログに出さない。
+	SecretKeys int
 }
 
 // Write が返す番兵エラー。*fs.PathError に包んで返すので、呼び出し側は errors.Is で
@@ -139,6 +142,9 @@ func Write(ctx context.Context, opts Options) (Summary, error) {
 	sum := Summary{Path: final, SkippedSpecialFiles: len(got.skipped)}
 	for _, k := range got.keys {
 		sum.Keys = append(sum.Keys, k.Fingerprint)
+		if len(k.Secrets) > 0 {
+			sum.SecretKeys++
+		}
 	}
 	return sum, nil
 }
@@ -171,6 +177,9 @@ func writeArchive(ctx context.Context, w io.Writer, top string, now time.Time, o
 	}
 	keys, err := collectKeys(ctx, g, ids)
 	if err != nil {
+		return archived{}, err
+	}
+	if err := collectSecretKeys(ctx, g, keys); err != nil {
 		return archived{}, err
 	}
 	public, err := exportPublicKeys(ctx, g, keys)
@@ -206,6 +215,9 @@ func writeArchive(ctx context.Context, w io.Writer, top string, now time.Time, o
 	if err := writeBytes(tw, path.Join(gnupg, "ownertrust.txt"), ownertrust, now); err != nil {
 		return archived{}, err
 	}
+	if err := writeSecretKeys(tw, path.Join(gnupg, "private-keys-v1.d"), keys, now); err != nil {
+		return archived{}, err
+	}
 	// 飛ばしたものを書くので、README.txt はストアの後に書く。
 	if err := writeReadme(tw, top, readmeData{
 		CreatedAt: now.Format("2006-01-02 15:04:05 -0700"),
@@ -222,6 +234,28 @@ func writeArchive(ctx context.Context, w io.Writer, top string, now time.Time, o
 	return archived{keys: keys, skipped: skipped}, gz.Close()
 }
 
+// writeSecretKeys は、ストアの鍵の .key を dir/（0700）の下に <keygrip>.key（0600）として
+// 書く。.key が 1 つもなければ dir も作らない。
+func writeSecretKeys(tw *tar.Writer, dir string, keys []storeKey, now time.Time) error {
+	wroteDir := false
+	for _, k := range keys {
+		for _, s := range k.Secrets {
+			if !wroteDir {
+				if err := tw.WriteHeader(&tar.Header{
+					Typeflag: tar.TypeDir, Name: dir + "/", Mode: 0o700, ModTime: now,
+				}); err != nil {
+					return err
+				}
+				wroteDir = true
+			}
+			if err := writeBytes(tw, path.Join(dir, s.Keygrip+".key"), s.data, now); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // readmeData は README.txt のテンプレートに渡す。
 type readmeData struct {
 	CreatedAt string
@@ -230,6 +264,11 @@ type readmeData struct {
 	Keys []storeKey
 	// Skipped はストアから飛ばした特殊ファイルの、アーカイブの中でのパス（store/…）。
 	Skipped []string
+}
+
+// MissingSecrets は、ゲストに秘密鍵のないストアの鍵があるか。
+func (d readmeData) MissingSecrets() bool {
+	return slices.ContainsFunc(d.Keys, func(k storeKey) bool { return len(k.Secrets) == 0 })
 }
 
 func writeReadme(tw *tar.Writer, top string, data readmeData, now time.Time) error {

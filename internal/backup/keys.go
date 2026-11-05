@@ -3,11 +3,14 @@ package backup
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/backpaper0/passui/internal/store"
@@ -28,6 +31,8 @@ func (e *UnresolvedKeysError) Error() string {
 type storeKey struct {
 	// Fingerprint は主鍵の指紋。
 	Fingerprint string
+	// Secrets は、ゲストに秘密部分がある主鍵・副鍵の鍵ファイル。空ならゲストに秘密鍵がない。
+	Secrets []secretKey
 }
 
 // gpg はバックアップのために gpg を呼ぶ。ストアにも gpg-agent にも書き込む呼び出しはしない。
@@ -160,6 +165,122 @@ func primaryFingerprints(out []byte) []string {
 		}
 	}
 	return fprs
+}
+
+// secretKey は、ゲストに秘密部分がある鍵（主鍵か副鍵）の gpg-agent の鍵ファイル 1 つ。
+type secretKey struct {
+	// Keygrip は鍵ファイルの名前（<keygrip>.key）。
+	Keygrip string
+	// data は .key の中身（元のパスフレーズで保護されたまま）。ログにも README.txt にも出さない。
+	data []byte
+}
+
+// collectSecretKeys は、ストアの鍵 keys の主鍵・副鍵のうちゲストに秘密部分があるものの
+// .key を <homedir>/private-keys-v1.d/ から読み、keys[i].Secrets に入れる。
+//
+// 秘密部分があるかは、.key があるかで決める。gpg --list-secret-keys の sec / ssb の
+// 第 15 フィールドの "#"（主鍵がオフラインの sec# など）も gpg-agent が .key の有無から
+// 出すものだが、gpg-agent は読めない .key も「ない」と扱うため、そのまま使うと読めない
+// .key を黙って飛ばしてしまう。ここでは .key がないときだけ飛ばし、読めなければ失敗にする。
+// gpg-agent には問い合わせないので、ロック状態もキャッシュも変わらない。
+// 返すエラーには keygrip を入れない（ログに出るため）。
+func collectSecretKeys(ctx context.Context, g *gpg, keys []storeKey) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	args := []string{"--with-colons", "--with-keygrip", "--list-keys", "--"}
+	for _, k := range keys {
+		args = append(args, k.Fingerprint)
+	}
+	out, err := g.run(ctx, args...)
+	if err != nil {
+		return err
+	}
+	grips := keygrips(out)
+	home, err := g.homedir(ctx)
+	if err != nil {
+		return err
+	}
+	for i := range keys {
+		for _, grip := range grips[keys[i].Fingerprint] {
+			data, err := os.ReadFile(filepath.Join(home, "private-keys-v1.d", grip+".key"))
+			if errors.Is(err, fs.ErrNotExist) {
+				continue // ゲストにこの主鍵・副鍵の秘密部分がない
+			}
+			if err != nil {
+				var pe *fs.PathError
+				if errors.As(err, &pe) {
+					err = pe.Err // パスには keygrip が入る
+				}
+				return fmt.Errorf("read a secret key file in %s: %w", filepath.Join(home, "private-keys-v1.d"), err)
+			}
+			keys[i].Secrets = append(keys[i].Secrets, secretKey{Keygrip: grip, data: data})
+		}
+	}
+	return nil
+}
+
+// keygrips は gpg --with-colons --with-keygrip --list-keys の出力から、
+// 主鍵の指紋 → 主鍵と副鍵の keygrip（出てきた順）を返す。
+func keygrips(out []byte) map[string][]string {
+	grips := map[string][]string{}
+	var fpr string   // いまの鍵の主鍵の指紋
+	wantFpr := false // 次の fpr 行が主鍵の指紋
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Split(line, ":")
+		switch f[0] {
+		case "pub":
+			wantFpr = true
+		case "sub":
+			wantFpr = false
+		case "fpr":
+			if wantFpr && len(f) > 9 {
+				fpr = f[9]
+				wantFpr = false
+			}
+		case "grp":
+			if fpr != "" && len(f) > 9 && f[9] != "" && !slices.Contains(grips[fpr], f[9]) {
+				grips[fpr] = append(grips[fpr], f[9])
+			}
+		}
+	}
+	return grips
+}
+
+// homedir は gpgconf --list-dirs homedir で gpg の homedir を求める（GNUPGHOME を反映する）。
+func (g *gpg) homedir(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, lookPath(g.env, "gpgconf"), "--list-dirs", "homedir")
+	cmd.Env = g.env
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", ctxErr
+		}
+		return "", fmt.Errorf("gpgconf --list-dirs homedir: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	dir := unescapeGpgconf(strings.TrimSpace(stdout.String()))
+	if !filepath.IsAbs(dir) {
+		return "", fmt.Errorf("gpgconf --list-dirs homedir: not an absolute path: %q", dir)
+	}
+	return dir, nil
+}
+
+// unescapeGpgconf は gpgconf の出力の %XX（":" や "%" など）を元の文字に戻す。
+func unescapeGpgconf(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '%' && i+2 < len(s) {
+			if v, err := strconv.ParseUint(s[i+1:i+3], 16, 8); err == nil {
+				b.WriteByte(byte(v))
+				i += 2
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }
 
 // exportPublicKeys はストアの鍵すべての公開鍵を armor で返す。

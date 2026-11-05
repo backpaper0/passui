@@ -5,12 +5,24 @@ passui のバージョン: {{.Version}}
 
 store/ は、作成した時点のストアを丸ごと写したものです。
 
-ストアの鍵（主鍵の指紋）:
+ストアの鍵（主鍵の指紋）と秘密鍵の有無:
 {{range .Keys}}- {{.Fingerprint}}
-{{else}}（なし）
+{{- if .Secrets}}
+  秘密鍵: あり（keygrip:{{range .Secrets}} {{.Keygrip}}{{end}}）
+{{else}}
+  秘密鍵: なし（このゲストに秘密鍵がないため、公開鍵だけを入れました）
+{{end}}
+{{- else}}（なし）
 {{end}}
 gnupg/public-keys.asc は、ストアの鍵の公開鍵です。
 gnupg/ownertrust.txt は、ストアの鍵の ownertrust です（ストアの鍵の行だけ）。
+gnupg/private-keys-v1.d/<keygrip>.key は、ストアの鍵のうちこのゲストに秘密部分がある
+主鍵・副鍵の gpg-agent の鍵ファイルです。元のパスフレーズで保護されたままです。
+{{- if .MissingSecrets}}
+
+注意: 秘密鍵が「なし」の鍵だけで暗号化されたエントリは、このバックアップから復元しても
+復号できません。その鍵の秘密鍵は、別に持っている場所から取り込んでください。
+{{- end}}
 
 {{if .Skipped -}}
 飛ばしたファイル: ソケットなど、通常ファイル・ディレクトリ・シンボリックリンクのどれでもない
