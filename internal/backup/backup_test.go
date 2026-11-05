@@ -6,7 +6,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -266,5 +268,186 @@ func TestWriteLeavesNothingWhenCancelled(t *testing.T) {
 	}
 	if names := listDir(t, dest); len(names) != 0 {
 		t.Errorf("destination has %v, want nothing", names)
+	}
+}
+
+func TestWriteSkipsSocketsAndListsThemInReadme(t *testing.T) {
+	// UNIX ソケットのパスは短くないといけないので、t.TempDir より短い場所にストアを作る。
+	storeDir, err := os.MkdirTemp("", "passui")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(storeDir) })
+	if err := os.WriteFile(filepath.Join(storeDir, "bank.gpg"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(storeDir, "run"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"agent.sock", "run/other.sock"} {
+		l, err := net.Listen("unix", filepath.Join(storeDir, filepath.FromSlash(name)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { l.Close() })
+	}
+	dest := t.TempDir()
+
+	sum, err := backup.Write(t.Context(), backup.Options{StoreDir: storeDir, Dir: dest, Now: at})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	if sum.SkippedSpecialFiles != 2 {
+		t.Errorf("SkippedSpecialFiles = %d, want 2", sum.SkippedSpecialFiles)
+	}
+	got := readArchive(t, sum.Path)
+	const top = "passui-backup-20261105-090807/"
+	for _, name := range []string{"store/agent.sock", "store/run/other.sock"} {
+		if _, ok := got[top+name]; ok {
+			t.Errorf("archive has %s, want it skipped", name)
+		}
+	}
+	if _, ok := got[top+"store/bank.gpg"]; !ok {
+		t.Errorf("archive lacks store/bank.gpg; has %v", keys(got))
+	}
+	readme := got[top+"README.txt"].body
+	for _, s := range []string{"store/agent.sock", "store/run/other.sock"} {
+		if !strings.Contains(readme, s) {
+			t.Errorf("README.txt lacks %q:\n%s", s, readme)
+		}
+	}
+}
+
+func TestWriteSaysNothingWasSkippedWhenStoreHasNoSpecialFiles(t *testing.T) {
+	storeDir := newStore(t, map[string]string{"bank.gpg": "x"})
+
+	sum, err := backup.Write(t.Context(), backup.Options{StoreDir: storeDir, Dir: t.TempDir(), Now: at})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	if sum.SkippedSpecialFiles != 0 {
+		t.Errorf("SkippedSpecialFiles = %d, want 0", sum.SkippedSpecialFiles)
+	}
+	readme := readArchive(t, sum.Path)["passui-backup-20261105-090807/README.txt"].body
+	if !strings.Contains(readme, "飛ばしたファイル: なし") {
+		t.Errorf("README.txt does not say nothing was skipped:\n%s", readme)
+	}
+}
+
+func TestWriteKeepsSymlinksAsLinksWithoutFollowingThem(t *testing.T) {
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("outside-the-store"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	storeDir := newStore(t, map[string]string{"bank.gpg": "ciphertext-bank"})
+	links := map[string]string{
+		"alias.gpg":   "bank.gpg",
+		"outside.txt": filepath.Join(outside, "secret.txt"),
+		"outside-dir": outside,
+	}
+	for link, target := range links {
+		if err := os.Symlink(target, filepath.Join(storeDir, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dest := t.TempDir()
+
+	sum, err := backup.Write(t.Context(), backup.Options{StoreDir: storeDir, Dir: dest, Now: at})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	got := readArchive(t, sum.Path)
+	const top = "passui-backup-20261105-090807/"
+	for link, target := range links {
+		e, ok := got[top+"store/"+link]
+		if !ok {
+			t.Errorf("archive lacks store/%s; has %v", link, keys(got))
+			continue
+		}
+		if e.header.Typeflag != tar.TypeSymlink || e.header.Linkname != target {
+			t.Errorf("%s: type %c linkname %q, want a symlink to %q", link, e.header.Typeflag, e.header.Linkname, target)
+		}
+	}
+	for name, e := range got {
+		if strings.Contains(e.body, "outside-the-store") || strings.HasPrefix(name, top+"store/outside-dir/") {
+			t.Errorf("archive has %s from outside the store", name)
+		}
+	}
+}
+
+func TestWriteKeepsPermissionsWhenExtractedWithTar(t *testing.T) {
+	tarCmd, err := exec.LookPath("tar")
+	if err != nil {
+		t.Skip("tar is not installed")
+	}
+	storeDir := newStore(t, map[string]string{
+		".git/HEAD":             "ref: refs/heads/main\n",
+		".git/hooks/pre-commit": "#!/bin/sh\n",
+		".git/objects/ab/cdef":  "object",
+		"shared/notes.txt":      "plain",
+	})
+	modes := map[string]os.FileMode{
+		".git/hooks/pre-commit": 0o755,
+		".git/objects/ab/cdef":  0o444,
+		"shared/notes.txt":      0o644,
+		".git/objects/ab":       0o755,
+		"shared":                0o750,
+	}
+	for name, mode := range modes {
+		if err := os.Chmod(filepath.Join(storeDir, filepath.FromSlash(name)), mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	sum, err := backup.Write(t.Context(), backup.Options{StoreDir: storeDir, Dir: t.TempDir(), Now: at})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	out := t.TempDir()
+	cmd := exec.Command(tarCmd, "xzf", sum.Path)
+	cmd.Dir = out
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("tar xzf: %v\n%s", err, b)
+	}
+	restored := filepath.Join(out, "passui-backup-20261105-090807", "store")
+	for name, mode := range modes {
+		fi, err := os.Stat(filepath.Join(restored, filepath.FromSlash(name)))
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		// tar xzf は umask を当てるので、umask で落ちうるビットは比べない。
+		if got, want := fi.Mode().Perm()&^0o022, mode&^0o022; got != want {
+			t.Errorf("%s mode = %v, want %v", name, fi.Mode().Perm(), mode)
+		}
+	}
+	if b, err := os.ReadFile(filepath.Join(restored, ".git", "HEAD")); err != nil || string(b) != "ref: refs/heads/main\n" {
+		t.Errorf(".git/HEAD = %q, %v", b, err)
+	}
+}
+
+func TestWriteCopiesStoreThroughSymlinkedStoreDir(t *testing.T) {
+	real := newStore(t, map[string]string{"bank.gpg": "ciphertext-bank"})
+	storeDir := filepath.Join(t.TempDir(), "password-store")
+	if err := os.Symlink(real, storeDir); err != nil {
+		t.Fatal(err)
+	}
+
+	sum, err := backup.Write(t.Context(), backup.Options{StoreDir: storeDir, Dir: t.TempDir(), Now: at})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	got := readArchive(t, sum.Path)
+	const top = "passui-backup-20261105-090807/"
+	if e := got[top+"store/"]; e.header == nil || e.header.Typeflag != tar.TypeDir {
+		t.Errorf("store/ is not a directory; has %v", keys(got))
+	}
+	if e := got[top+"store/bank.gpg"]; e.body != "ciphertext-bank" {
+		t.Errorf("store/bank.gpg = %q; has %v", e.body, keys(got))
 	}
 }

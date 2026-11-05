@@ -47,7 +47,7 @@ func (s *handler) runBackup(r *http.Request) (int, backupData) {
 		id := logFailure(r.Context(), s.logger, "backup", "dir", s.cfg.BackupDir, "err", err)
 		return http.StatusInternalServerError, backupData{Failure: failureMessage(id)}
 	}
-	s.logOperation(r, "backup", "", "path", sum.Path, "store_keys", len(sum.Keys))
+	s.logOperation(r, "backup", "", "path", sum.Path, "store_keys", len(sum.Keys), "skipped_special_files", sum.SkippedSpecialFiles)
 	s.logger.DebugContext(r.Context(), "backup store keys", "fingerprints", sum.Keys)
 	return http.StatusOK, backupData{Path: sum.Path}
 }
