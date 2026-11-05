@@ -148,3 +148,48 @@ func TestBackupRequiresLoginAndSameOrigin(t *testing.T) {
 		t.Errorf("Backup called %d times, want 0", fake.calls)
 	}
 }
+
+func TestBackupWithUnresolvedKeysShowsKeyIDs(t *testing.T) {
+	for _, htmx := range []bool{true, false} {
+		h := passuitest.New(t)
+		fake := &fakeBackup{err: &backup.UnresolvedKeysError{IDs: []string{"nobody@example.invalid", "DEADBEEF"}}}
+		srv := h.Serve(passuitest.Options{Backup: fake.Backup})
+
+		res, body := postBackup(t, srv, htmx)
+
+		if res.StatusCode != http.StatusConflict {
+			t.Errorf("htmx=%v: status = %d, want 409:\n%s", htmx, res.StatusCode, body)
+		}
+		for _, s := range []string{
+			"ストアの鍵が見つかりません: <code>nobody@example.invalid</code>, <code>DEADBEEF</code>",
+			"<code>.gpg-id</code> と <code>PASSWORD_STORE_KEY</code> を確かめてください。バックアップ先には何も置いていません。",
+		} {
+			if !strings.Contains(body, s) {
+				t.Errorf("htmx=%v: body lacks %q:\n%s", htmx, s, body)
+			}
+		}
+		if strings.Contains(body, "エラー ID") {
+			t.Errorf("htmx=%v: body shows an error ID:\n%s", htmx, body)
+		}
+		if got := strings.Contains(body, "<html"); got != !htmx {
+			t.Errorf("htmx=%v: full page = %v:\n%s", htmx, got, body)
+		}
+		if logs := h.Logs(); !strings.Contains(logs, "nobody@example.invalid") || !strings.Contains(logs, "DEADBEEF") {
+			t.Errorf("htmx=%v: logs lack the unresolved key IDs:\n%s", htmx, logs)
+		}
+	}
+}
+
+func TestBackupLogsNumberOfStoreKeys(t *testing.T) {
+	h := passuitest.New(t)
+	fake := &fakeBackup{sum: backup.Summary{Path: backupPath, Keys: []string{"AAAA", "BBBB"}}}
+	srv := h.Serve(passuitest.Options{Backup: fake.Backup})
+
+	if res, body := postBackup(t, srv, true); res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d:\n%s", res.StatusCode, body)
+	}
+
+	if logs := h.Logs(); !strings.Contains(logs, "op=backup") || !strings.Contains(logs, "store_keys=2") {
+		t.Errorf("logs lack the number of store keys:\n%s", logs)
+	}
+}

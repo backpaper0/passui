@@ -21,8 +21,10 @@ func TestIntegrationWriteWhileLockedSucceedsAndKeepsLocked(t *testing.T) {
 	}
 
 	got := readArchive(t, sum.Path)
-	if _, ok := got["passui-backup-20261105-090807/store/bank.gpg"]; !ok {
-		t.Errorf("archive lacks the entry; has %v", keys(got))
+	for _, name := range []string{"store/bank.gpg", "store/.gpg-id"} {
+		if _, ok := got["passui-backup-20261105-090807/"+name]; !ok {
+			t.Errorf("archive lacks %s; has %v", name, keys(got))
+		}
 	}
 	locked, err := g.Backend().Locked(t.Context())
 	if err != nil {

@@ -4,3 +4,10 @@ passui のバックアップ
 passui のバージョン: {{.Version}}
 
 store/ は、作成した時点のストアを丸ごと写したものです。
+
+ストアの鍵（主鍵の指紋）:
+{{range .Keys}}- {{.Fingerprint}}
+{{else}}（なし）
+{{end}}
+gnupg/public-keys.asc は、ストアの鍵の公開鍵です。
+gnupg/ownertrust.txt は、ストアの鍵の ownertrust です（ストアの鍵の行だけ）。

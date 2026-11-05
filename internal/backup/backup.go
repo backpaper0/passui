@@ -42,6 +42,8 @@ type Options struct {
 type Summary struct {
 	// Path は置いたバックアップの完全なパス。
 	Path string
+	// Keys はストアの鍵（主鍵の指紋）。ログには数を出し、指紋は debug のときだけ出す。
+	Keys []string
 }
 
 // mu はバックアップの作成をプロセス内で直列化する。
@@ -90,7 +92,8 @@ func Write(ctx context.Context, opts Options) (Summary, error) {
 		}
 	}()
 
-	if err := writeArchive(ctx, f, name, now, opts); err != nil {
+	keys, err := writeArchive(ctx, f, name, now, opts)
+	if err != nil {
 		return Summary{}, err
 	}
 	if err := f.Sync(); err != nil {
@@ -110,50 +113,90 @@ func Write(ctx context.Context, opts Options) (Summary, error) {
 		return Summary{}, fmt.Errorf("rename temporary file: %w", err)
 	}
 	renamed = true
-	return Summary{Path: final}, nil
+	sum := Summary{Path: final}
+	for _, k := range keys {
+		sum.Keys = append(sum.Keys, k.Fingerprint)
+	}
+	return sum, nil
 }
 
-// writeArchive は w に tar.gz を書く。中身はすべて top/ の下に置く。
-func writeArchive(ctx context.Context, w io.Writer, top string, now time.Time, opts Options) error {
+// writeArchive は w に tar.gz を書き、入れたストアの鍵を返す。中身はすべて top/ の下に置く。
+func writeArchive(ctx context.Context, w io.Writer, top string, now time.Time, opts Options) ([]storeKey, error) {
+	g := newGPG(opts.Env)
+	ids, err := keyIDs(ctx, opts.StoreDir, opts.Env)
+	if err != nil {
+		return nil, err
+	}
+	keys, err := collectKeys(ctx, g, ids)
+	if err != nil {
+		return nil, err
+	}
+	public, err := exportPublicKeys(ctx, g, keys)
+	if err != nil {
+		return nil, err
+	}
+	ownertrust, err := exportOwnertrust(ctx, g, keys)
+	if err != nil {
+		return nil, err
+	}
+
 	gz := gzip.NewWriter(w)
 	tw := tar.NewWriter(gz)
 
 	if err := tw.WriteHeader(&tar.Header{
 		Typeflag: tar.TypeDir, Name: top + "/", Mode: 0o700, ModTime: now,
 	}); err != nil {
-		return err
+		return nil, err
 	}
-	if err := writeReadme(tw, top, now, opts); err != nil {
-		return err
+	if err := writeReadme(tw, top, now, opts, keys); err != nil {
+		return nil, err
 	}
 	if err := writeStore(ctx, tw, path.Join(top, "store"), opts.StoreDir); err != nil {
-		return err
+		return nil, err
+	}
+	gnupg := path.Join(top, "gnupg")
+	if err := tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeDir, Name: gnupg + "/", Mode: 0o700, ModTime: now,
+	}); err != nil {
+		return nil, err
+	}
+	if err := writeBytes(tw, path.Join(gnupg, "public-keys.asc"), public, now); err != nil {
+		return nil, err
+	}
+	if err := writeBytes(tw, path.Join(gnupg, "ownertrust.txt"), ownertrust, now); err != nil {
+		return nil, err
 	}
 
 	if err := tw.Close(); err != nil {
-		return err
+		return nil, err
 	}
-	return gz.Close()
+	return keys, gz.Close()
 }
 
-func writeReadme(tw *tar.Writer, top string, now time.Time, opts Options) error {
+func writeReadme(tw *tar.Writer, top string, now time.Time, opts Options, keys []storeKey) error {
 	var buf bytes.Buffer
 	if err := readmeTemplate.Execute(&buf, struct {
 		CreatedAt string
 		Version   string
+		Keys      []storeKey
 	}{
 		CreatedAt: now.Format("2006-01-02 15:04:05 -0700"),
 		Version:   opts.Version,
+		Keys:      keys,
 	}); err != nil {
 		return err
 	}
+	return writeBytes(tw, path.Join(top, "README.txt"), buf.Bytes(), now)
+}
+
+// writeBytes は b を name の通常ファイル（0600）として書く。
+func writeBytes(tw *tar.Writer, name string, b []byte, now time.Time) error {
 	if err := tw.WriteHeader(&tar.Header{
-		Typeflag: tar.TypeReg, Name: path.Join(top, "README.txt"), Mode: 0o600,
-		Size: int64(buf.Len()), ModTime: now,
+		Typeflag: tar.TypeReg, Name: name, Mode: 0o600, Size: int64(len(b)), ModTime: now,
 	}); err != nil {
 		return err
 	}
-	_, err := tw.Write(buf.Bytes())
+	_, err := tw.Write(b)
 	return err
 }
 
