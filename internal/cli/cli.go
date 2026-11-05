@@ -125,6 +125,10 @@ func serve(ctx context.Context, env environ, stderr io.Writer) int {
 	backend := store.NewPass(storeCfg, logger)
 
 	// バックアップ先を決められなくても起動は止めない（バックアップを押したときに失敗する）。
+	// 決められないのは、PASSUI_BACKUP_DIR も絶対パスの XDG_DATA_HOME もなく HOME が空の
+	// ときだけで、HOME が空でも PASSWORD_STORE_DIR と GNUPGHOME があればストアは使える。
+	// そのときバックアップは 500（エラー ID 付き）になり、ログの err に理由が出る。
+	// 起動時にバックアップ先を確かめないのと同じく、バックアップのために起動を止めない。
 	backupDir, createBackupDir, backupDirErr := backupDir(env)
 	if backupDirErr != nil {
 		logger.Warn("cannot locate the backup directory", "err", backupDirErr)

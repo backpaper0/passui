@@ -121,7 +121,7 @@ func Write(ctx context.Context, opts Options) (Summary, error) {
 		}
 	}()
 
-	got, err := writeArchive(ctx, f, name, now, opts)
+	written, err := writeArchive(ctx, f, name, now, opts)
 	if err != nil {
 		return Summary{}, err
 	}
@@ -142,14 +142,14 @@ func Write(ctx context.Context, opts Options) (Summary, error) {
 		return Summary{}, fmt.Errorf("rename temporary file: %w", err)
 	}
 	renamed = true
-	sum := Summary{Path: final, SkippedSpecialFiles: len(got.skipped)}
-	for _, k := range got.keys {
-		sum.Keys = append(sum.Keys, k.Fingerprint)
+	summary := Summary{Path: final, SkippedSpecialFiles: len(written.skipped)}
+	for _, k := range written.keys {
+		summary.Keys = append(summary.Keys, k.Fingerprint)
 		if len(k.Secrets) > 0 {
-			sum.SecretKeys++
+			summary.SecretKeys++
 		}
 	}
-	return sum, nil
+	return summary, nil
 }
 
 // archived は writeArchive がアーカイブに入れたものの要約。
@@ -174,7 +174,7 @@ func notWritable(dir string, cause error) error {
 // ストアの鍵は、アーカイブを書き始める前に集める。
 func writeArchive(ctx context.Context, w io.Writer, top string, now time.Time, opts Options) (archived, error) {
 	g := newGPG(opts.Env)
-	ids, err := keyIDs(ctx, opts.StoreDir, opts.Env)
+	ids, err := keyIDs(ctx, opts)
 	if err != nil {
 		return archived{}, err
 	}
@@ -195,64 +195,83 @@ func writeArchive(ctx context.Context, w io.Writer, top string, now time.Time, o
 	}
 
 	gz := gzip.NewWriter(w)
-	tw := tar.NewWriter(gz)
+	a := archive{tw: tar.NewWriter(gz), now: now}
 
-	if err := tw.WriteHeader(&tar.Header{
-		Typeflag: tar.TypeDir, Name: top + "/", Mode: 0o700, ModTime: now,
-	}); err != nil {
+	if err := a.dir(top); err != nil {
 		return archived{}, err
 	}
-	skipped, err := writeStore(ctx, tw, top, "store", opts.StoreDir)
+	skipped, err := writeStore(ctx, a.tw, top, "store", opts.StoreDir)
 	if err != nil {
 		return archived{}, err
 	}
 	gnupg := path.Join(top, "gnupg")
-	if err := tw.WriteHeader(&tar.Header{
-		Typeflag: tar.TypeDir, Name: gnupg + "/", Mode: 0o700, ModTime: now,
-	}); err != nil {
+	if err := a.dir(gnupg); err != nil {
 		return archived{}, err
 	}
-	if err := writeBytes(tw, path.Join(gnupg, "public-keys.asc"), public, now); err != nil {
+	if err := a.file(path.Join(gnupg, "public-keys.asc"), public); err != nil {
 		return archived{}, err
 	}
-	if err := writeBytes(tw, path.Join(gnupg, "ownertrust.txt"), ownertrust, now); err != nil {
+	if err := a.file(path.Join(gnupg, "ownertrust.txt"), ownertrust); err != nil {
 		return archived{}, err
 	}
-	if err := writeSecretKeys(tw, path.Join(gnupg, "private-keys-v1.d"), keys, now); err != nil {
+	if err := writeSecretKeys(a, path.Join(gnupg, "private-keys-v1.d"), keys); err != nil {
 		return archived{}, err
 	}
 	// 飛ばしたものを書くので、README.txt はストアの後に書く。
-	if err := writeReadme(tw, top, readmeData{
+	if err := writeReadme(a, top, readmeData{
 		Name:      top,
 		CreatedAt: now.Format("2006-01-02 15:04:05 -0700"),
 		Version:   opts.Version,
 		Keys:      keys,
 		Skipped:   skipped,
-	}, now); err != nil {
+	}); err != nil {
 		return archived{}, err
 	}
 
-	if err := tw.Close(); err != nil {
+	if err := a.tw.Close(); err != nil {
 		return archived{}, err
 	}
 	return archived{keys: keys, skipped: skipped}, gz.Close()
 }
 
-// writeSecretKeys は、ストアの鍵の .key を dir/（0700）の下に <keygrip>.key（0600）として
-// 書く。.key が 1 つもなければ dir も作らない。
-func writeSecretKeys(tw *tar.Writer, dir string, keys []storeKey, now time.Time) error {
+// archive は、passui が作るもの（ストアの写し以外）を tar に書く。パーミッションは
+// ディレクトリが 0700、ファイルが 0600 で、時刻はどれも作成日時 now にする。
+type archive struct {
+	tw  *tar.Writer
+	now time.Time
+}
+
+// dir は name のディレクトリ（0700）を書く。
+func (a archive) dir(name string) error {
+	return a.tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeDir, Name: name + "/", Mode: 0o700, ModTime: a.now,
+	})
+}
+
+// file は b を name の通常ファイル（0600）として書く。
+func (a archive) file(name string, b []byte) error {
+	if err := a.tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeReg, Name: name, Mode: 0o600, Size: int64(len(b)), ModTime: a.now,
+	}); err != nil {
+		return err
+	}
+	_, err := a.tw.Write(b)
+	return err
+}
+
+// writeSecretKeys は、ストアの鍵の .key を dir/ の下に <keygrip>.key として書く。
+// .key が 1 つもなければ dir も作らない。
+func writeSecretKeys(a archive, dir string, keys []storeKey) error {
 	wroteDir := false
 	for _, k := range keys {
 		for _, s := range k.Secrets {
 			if !wroteDir {
-				if err := tw.WriteHeader(&tar.Header{
-					Typeflag: tar.TypeDir, Name: dir + "/", Mode: 0o700, ModTime: now,
-				}); err != nil {
+				if err := a.dir(dir); err != nil {
 					return err
 				}
 				wroteDir = true
 			}
-			if err := writeBytes(tw, path.Join(dir, s.Keygrip+".key"), s.data, now); err != nil {
+			if err := a.file(path.Join(dir, s.Keygrip+".key"), s.data); err != nil {
 				return err
 			}
 		}
@@ -272,8 +291,8 @@ type readmeData struct {
 	Skipped []string
 }
 
-// Steps は、このバックアップ向けの復元の手順に渡す値。
-func (d readmeData) Steps() restoreSteps {
+// RestoreSteps は、このバックアップ向けの復元の手順（restore-steps）に渡す値。
+func (d readmeData) RestoreSteps() restoreSteps {
 	return restoreSteps{Name: d.Name, Keys: d.Keys}
 }
 
@@ -282,23 +301,12 @@ func (d readmeData) MissingSecrets() bool {
 	return slices.ContainsFunc(d.Keys, func(k storeKey) bool { return len(k.Secrets) == 0 })
 }
 
-func writeReadme(tw *tar.Writer, top string, data readmeData, now time.Time) error {
+func writeReadme(a archive, top string, data readmeData) error {
 	var buf bytes.Buffer
 	if err := readmeTemplate.ExecuteTemplate(&buf, "README.txt", data); err != nil {
 		return err
 	}
-	return writeBytes(tw, path.Join(top, "README.txt"), buf.Bytes(), now)
-}
-
-// writeBytes は b を name の通常ファイル（0600）として書く。
-func writeBytes(tw *tar.Writer, name string, b []byte, now time.Time) error {
-	if err := tw.WriteHeader(&tar.Header{
-		Typeflag: tar.TypeReg, Name: name, Mode: 0o600, Size: int64(len(b)), ModTime: now,
-	}); err != nil {
-		return err
-	}
-	_, err := tw.Write(b)
-	return err
+	return a.file(path.Join(top, "README.txt"), buf.Bytes())
 }
 
 // writeStore はストアを丸ごと top/dir/ の下に書く。パーミッションは tar のヘッダーに保つ。

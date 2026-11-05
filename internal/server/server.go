@@ -36,7 +36,8 @@ type Config struct {
 	Token secret.Value
 	// Store はストア バックエンド。
 	Store store.Backend
-	// BackupDir はバックアップ先（解決済みの絶対パス）。
+	// BackupDir はバックアップ先（解決済みの絶対パス）。Backup が問題のパスを返さない
+	// 失敗のときに画面とログに出すパスとして使う（実際に置く場所は Backup が決める）。
 	BackupDir string
 	// Backup はバックアップを作ってバックアップ先に置く（POST /backup）。serve は
 	// backup.Write を包んだものを渡す。テストでは偽物に差し替える。

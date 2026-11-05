@@ -35,10 +35,15 @@ type storeKey struct {
 	Secrets []secretKey
 }
 
-// gpg はバックアップのために gpg を呼ぶ。ストアにも gpg-agent にも書き込む呼び出しはしない。
+// gpg はバックアップのために gpg と gpgconf を呼ぶ。ストアにも gpg-agent にも書き込む
+// 呼び出しはしない。
+//
+// ストアの Pass（store パッケージ）は子プロセスの stderr を warn でログに出してエラーには
+// 入れないが、ここでは stderr をエラーに入れて返す。backup はロガーを持たず、失敗のログは
+// 呼び出し側（server）がエラー ID と一緒に 1 行で出すため（失敗時のログにエラー ID と
+// gpg の stderr を出す、という要件）。ここで呼ぶ gpg の stdin にも stdout にも
+// シークレットは流れない。
 type gpg struct {
-	// prog は gpg の実行ファイル（env の PATH から探す）。
-	prog string
 	// env は子プロセスの環境（GNUPGHOME などを含む）。LC_ALL は C に上書きする。
 	env []string
 }
@@ -51,12 +56,14 @@ func newGPG(env []string) *gpg {
 		}
 	}
 	g.env = append(g.env, "LC_ALL=C")
-	g.prog = lookPath(env, "gpg")
 	return g
 }
 
 // lookPath は env の PATH から実行可能な name を探す。見つからなければ name を
-// そのまま返す（プロセスの PATH で探される）。
+// そのまま返す（プロセスの PATH で探され、見つからなければ実行のときに失敗する）。
+// cli にも env の PATH から探す lookPath があるが、あちらは起動時の設定の検査で、
+// 見つからなければ日本語のエラーで止める。ここではバックアップの失敗として扱えば
+// よいので、パッケージをまたいで共有はしない。
 func lookPath(env []string, name string) string {
 	for _, dir := range filepath.SplitList(lookupEnv(env, "PATH")) {
 		if dir == "" {
@@ -75,7 +82,13 @@ func lookPath(env []string, name string) string {
 // --no-auto-check-trustdb は、一覧を出すついでに trustdb を検査して trustdb.gpg を
 // 書き換えないため（バックアップは取るだけで、gpg の状態を変えない）。
 func (g *gpg) run(ctx context.Context, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, g.prog, append([]string{"--batch", "--no-auto-check-trustdb"}, args...)...)
+	return g.exec(ctx, "gpg", append([]string{"--batch", "--no-auto-check-trustdb"}, args...)...)
+}
+
+// exec は name（env の PATH から探す）を args で呼び、stdout を返す。終了コードが 0 で
+// なければ、stderr を含むエラーを返す。ctx が終わっていれば ctx のエラーを返す。
+func (g *gpg) exec(ctx context.Context, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, lookPath(g.env, name), args...)
 	cmd.Env = g.env
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -84,19 +97,20 @@ func (g *gpg) run(ctx context.Context, args ...string) ([]byte, error) {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
-		return nil, fmt.Errorf("gpg %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+		return nil, fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil
 }
 
-// keyIDs はストアの鍵の ID（すべての .gpg-id と、あれば PASSWORD_STORE_KEY）を、重複なしで返す。
-func keyIDs(ctx context.Context, storeDir string, env []string) ([]string, error) {
-	ids, err := store.KeyIDs(ctx, storeDir)
+// keyIDs はストアの鍵の ID（opts.StoreDir のすべての .gpg-id と、opts.Env に
+// PASSWORD_STORE_KEY があればその鍵）を、重複なしで返す。
+func keyIDs(ctx context.Context, opts Options) ([]string, error) {
+	ids, err := store.KeyIDs(ctx, opts.StoreDir)
 	if err != nil {
 		return nil, err
 	}
 	// pass と同じく、PASSWORD_STORE_KEY は空白区切りの鍵の一覧。
-	for _, id := range strings.Fields(lookupEnv(env, "PASSWORD_STORE_KEY")) {
+	for _, id := range strings.Fields(lookupEnv(opts.Env, "PASSWORD_STORE_KEY")) {
 		if !slices.Contains(ids, id) {
 			ids = append(ids, id)
 		}
@@ -130,13 +144,13 @@ func collectKeys(ctx context.Context, g *gpg, ids []string) ([]storeKey, error) 
 			unresolved = append(unresolved, id)
 			continue
 		}
-		fprs := primaryFingerprints(out)
-		if len(fprs) == 0 {
+		listed := parseKeyList(out)
+		if len(listed) == 0 {
 			unresolved = append(unresolved, id)
 		}
-		for _, fpr := range fprs {
-			if !slices.ContainsFunc(keys, func(k storeKey) bool { return k.Fingerprint == fpr }) {
-				keys = append(keys, storeKey{Fingerprint: fpr})
+		for _, l := range listed {
+			if !hasFingerprint(keys, l.Fingerprint) {
+				keys = append(keys, storeKey{Fingerprint: l.Fingerprint})
 			}
 		}
 	}
@@ -150,23 +164,50 @@ func collectKeys(ctx context.Context, g *gpg, ids []string) ([]storeKey, error) 
 	return keys, nil
 }
 
-// primaryFingerprints は gpg --with-colons の出力から、主鍵（pub / sec）の指紋を返す。
-func primaryFingerprints(out []byte) []string {
-	var fprs []string
-	primary := false
+// listedKey は gpg --with-colons --list-keys の一覧の鍵 1 つ。
+type listedKey struct {
+	// Fingerprint は主鍵の指紋。
+	Fingerprint string
+	// Keygrips は主鍵と副鍵の keygrip（出てきた順）。--with-keygrip のときだけ入る。
+	Keygrips []string
+}
+
+// parseKeyList は gpg --with-colons --list-keys（--with-keygrip 付きでもよい）の出力を、
+// 主鍵の指紋がわかった鍵ごとに返す。ここでは公開鍵の一覧（pub / sub）だけを読む
+// （秘密鍵の一覧の sec / ssb は使わない。collectSecretKeys を参照）。
+func parseKeyList(out []byte) []listedKey {
+	var keys []listedKey
+	cur := -1        // いまの鍵の keys での位置（pub の次の fpr 行で決まる）
+	wantFpr := false // 次の fpr 行が主鍵の指紋
 	for _, line := range strings.Split(string(out), "\n") {
 		f := strings.Split(line, ":")
-		switch {
-		case f[0] == "pub" || f[0] == "sec":
-			primary = true
-		case f[0] == "sub" || f[0] == "ssb":
-			primary = false
-		case f[0] == "fpr" && len(f) > 9 && primary:
-			fprs = append(fprs, f[9])
-			primary = false
+		switch f[0] {
+		case "pub":
+			cur, wantFpr = -1, true
+		case "sub":
+			wantFpr = false
+		case "fpr":
+			if wantFpr && len(f) > 9 && f[9] != "" {
+				keys = append(keys, listedKey{Fingerprint: f[9]})
+				cur, wantFpr = len(keys)-1, false
+			}
+		case "grp":
+			if cur >= 0 && len(f) > 9 && f[9] != "" && !slices.Contains(keys[cur].Keygrips, f[9]) {
+				keys[cur].Keygrips = append(keys[cur].Keygrips, f[9])
+			}
 		}
 	}
-	return fprs
+	return keys
+}
+
+// sameFingerprint は 2 つの指紋が同じ鍵を指すか（16 進なので大文字・小文字を区別しない）。
+func sameFingerprint(a, b string) bool {
+	return strings.EqualFold(a, b)
+}
+
+// hasFingerprint は keys に指紋 fpr の鍵があるか。
+func hasFingerprint(keys []storeKey, fpr string) bool {
+	return slices.ContainsFunc(keys, func(k storeKey) bool { return sameFingerprint(k.Fingerprint, fpr) })
 }
 
 // secretKey は、ゲストに秘密部分がある鍵（主鍵か副鍵）の gpg-agent の鍵ファイル 1 つ。
@@ -198,13 +239,19 @@ func collectSecretKeys(ctx context.Context, g *gpg, keys []storeKey) error {
 	if err != nil {
 		return err
 	}
-	grips := keygrips(out)
+	listed := parseKeyList(out)
 	home, err := g.homedir(ctx)
 	if err != nil {
 		return err
 	}
 	for i := range keys {
-		for _, grip := range grips[keys[i].Fingerprint] {
+		var grips []string
+		for _, l := range listed {
+			if sameFingerprint(l.Fingerprint, keys[i].Fingerprint) {
+				grips = l.Keygrips
+			}
+		}
+		for _, grip := range grips {
 			data, err := os.ReadFile(filepath.Join(home, "private-keys-v1.d", grip+".key"))
 			if errors.Is(err, fs.ErrNotExist) {
 				continue // ゲストにこの主鍵・副鍵の秘密部分がない
@@ -222,47 +269,13 @@ func collectSecretKeys(ctx context.Context, g *gpg, keys []storeKey) error {
 	return nil
 }
 
-// keygrips は gpg --with-colons --with-keygrip --list-keys の出力から、
-// 主鍵の指紋 → 主鍵と副鍵の keygrip（出てきた順）を返す。
-func keygrips(out []byte) map[string][]string {
-	grips := map[string][]string{}
-	var fpr string   // いまの鍵の主鍵の指紋
-	wantFpr := false // 次の fpr 行が主鍵の指紋
-	for _, line := range strings.Split(string(out), "\n") {
-		f := strings.Split(line, ":")
-		switch f[0] {
-		case "pub":
-			wantFpr = true
-		case "sub":
-			wantFpr = false
-		case "fpr":
-			if wantFpr && len(f) > 9 {
-				fpr = f[9]
-				wantFpr = false
-			}
-		case "grp":
-			if fpr != "" && len(f) > 9 && f[9] != "" && !slices.Contains(grips[fpr], f[9]) {
-				grips[fpr] = append(grips[fpr], f[9])
-			}
-		}
-	}
-	return grips
-}
-
 // homedir は gpgconf --list-dirs homedir で gpg の homedir を求める（GNUPGHOME を反映する）。
 func (g *gpg) homedir(ctx context.Context) (string, error) {
-	cmd := exec.CommandContext(ctx, lookPath(g.env, "gpgconf"), "--list-dirs", "homedir")
-	cmd.Env = g.env
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return "", ctxErr
-		}
-		return "", fmt.Errorf("gpgconf --list-dirs homedir: %w: %s", err, strings.TrimSpace(stderr.String()))
+	out, err := g.exec(ctx, "gpgconf", "--list-dirs", "homedir")
+	if err != nil {
+		return "", err
 	}
-	dir := unescapeGpgconf(strings.TrimSpace(stdout.String()))
+	dir := unescapeGpgconf(strings.TrimSpace(string(out)))
 	if !filepath.IsAbs(dir) {
 		return "", fmt.Errorf("gpgconf --list-dirs homedir: not an absolute path: %q", dir)
 	}
@@ -313,7 +326,7 @@ func exportOwnertrust(ctx context.Context, g *gpg, keys []storeKey) ([]byte, err
 		if !ok || strings.HasPrefix(line, "#") {
 			continue
 		}
-		if slices.ContainsFunc(keys, func(k storeKey) bool { return strings.EqualFold(k.Fingerprint, fpr) }) {
+		if hasFingerprint(keys, fpr) {
 			buf.WriteString(line + "\n")
 		}
 	}

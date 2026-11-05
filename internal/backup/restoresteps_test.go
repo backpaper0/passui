@@ -6,6 +6,9 @@ import (
 	"testing"
 )
 
+// README.md の「バックアップと復元」の節で、復元の手順（restore-steps）を囲む印。
+// 印の名前は仕様（#65）どおり節の名前に合わせて backup-steps とし、コードでは中身を
+// 表す「復元の手順」（restoreSteps / restore-steps）と呼ぶ。
 const (
 	stepsBegin = "<!-- backup-steps:begin -->\n"
 	stepsEnd   = "<!-- backup-steps:end -->"

@@ -61,8 +61,12 @@ func (s *handler) backup(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, status, name, data)
 }
 
-// runBackup はバックアップを作り、応答のステータスと結果を返す。失敗はエラー ID 付きで
-// ログに出す（エラー文はブラウザに出さない）。
+// runBackup はバックアップを作り、応答のステータスと結果を返す。想定外の失敗（500）は
+// エラー ID 付きでログに出す（エラー文はブラウザに出さない）。
+//
+// 利用者が直せる失敗（409: バックアップ先の問題と、解決できない鍵 ID）は、画面に原因を
+// そのまま出してエラー ID は出さないので、ログにもエラー ID を付けず、warn で原因だけを
+// 出す。エラー ID は、画面からログを辿るためのものなので、画面に出すときだけ作る。
 func (s *handler) runBackup(r *http.Request) (int, backupData) {
 	if s.cfg.Backup == nil {
 		id := logFailure(r.Context(), s.logger, "backup", "err", errors.New("backup is not configured"))
