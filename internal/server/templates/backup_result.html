@@ -1,0 +1,7 @@
+{{define "backup-result"}}{{if .Path}}<div class="backup-result" role="status">
+<p>バックアップを置きました。</p>
+<p><code>{{.Path}}</code></p>
+</div>{{else}}<div class="backup-result" role="alert">
+<p class="error">{{.Failure}}</p>
+<p>ログでエラー ID を探してください。バックアップ先には何も置いていません。</p>
+</div>{{end}}{{end}}

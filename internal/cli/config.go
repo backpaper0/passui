@@ -111,6 +111,22 @@ func passConfig(env environ, passPath string) (store.PassConfig, error) {
 	return store.PassConfig{Pass: passPath, Dir: dir, GnupgHome: gnupg, Env: list}, nil
 }
 
+// backupDir はバックアップ先を env から決める。既定の場所
+// ${XDG_DATA_HOME:-$HOME/.local/share}/passui/backup を使い、create（なければ作る）を
+// true にする。XDG_DATA_HOME が絶対パスでなければ（XDG の仕様どおり）無視する。
+// ここではディレクトリの存在を確かめず、作りもしない（バックアップを作るときに作る）。
+func backupDir(env environ) (dir string, create bool, err error) {
+	base, _ := env.lookup("XDG_DATA_HOME")
+	if !filepath.IsAbs(base) {
+		home, _ := env.lookup("HOME")
+		if home == "" {
+			return "", false, fmt.Errorf("HOME が空です（バックアップ先の既定値を決められません）")
+		}
+		base = filepath.Join(home, ".local", "share")
+	}
+	return filepath.Join(base, "passui", "backup"), true, nil
+}
+
 // lookPath は env の PATH から実行可能な name を探す（os.Getenv の PATH は見ない）。
 func lookPath(env environ, name string) (string, error) {
 	path, _ := env.lookup("PATH")

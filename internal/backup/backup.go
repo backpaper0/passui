@@ -1,0 +1,212 @@
+// Package backup はバックアップ（ストアなどをまとめた 1 つの tar.gz）をバックアップ先に置く。
+// 入口は Write だけ。ストアにも gpg-agent にも書き込まない。
+package backup
+
+import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"context"
+	_ "embed"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"path"
+	"path/filepath"
+	"sync"
+	"text/template"
+	"time"
+)
+
+// Options は Write の設定。
+type Options struct {
+	// StoreDir はストアのディレクトリ（PASSWORD_STORE_DIR）。
+	StoreDir string
+	// Dir はバックアップ先（絶対パス）。
+	Dir string
+	// CreateDir が true なら、バックアップ先がなければ 0700 で（親も含めて）作る。
+	// 既定のバックアップ先を使うときだけ true にする。
+	CreateDir bool
+	// Now は作成日時。ファイル名と README.txt に使う（ゲストのローカル時刻にして使う）。
+	Now time.Time
+	// Version は passui のバージョン。README.txt に書く。
+	Version string
+	// Env は gpg を呼ぶための子プロセスの環境（"KEY=VALUE"。PASSWORD_STORE_KEY や
+	// GNUPGHOME を含む）。
+	Env []string
+}
+
+// Summary は Write の結果の要約。ログに使う（画面への応答には Path だけを使う）。
+type Summary struct {
+	// Path は置いたバックアップの完全なパス。
+	Path string
+}
+
+// mu はバックアップの作成をプロセス内で直列化する。
+var mu sync.Mutex
+
+//go:embed README.txt.tmpl
+var readmeText string
+
+var readmeTemplate = template.Must(template.New("README.txt").Parse(readmeText))
+
+// Write はその時点のストアを 1 つの tar.gz にまとめ、バックアップ先に
+// passui-backup-YYYYMMDD-HHMMSS.tar.gz（0600）として置く。
+//
+// 同じディレクトリの .passui-backup-YYYYMMDD-HHMMSS.tar.gz.partial に書いて fsync し、
+// 同じ名前のファイルがないことを確かめてから rename する。失敗したら一時ファイルを消す。
+func Write(ctx context.Context, opts Options) (Summary, error) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	if !filepath.IsAbs(opts.Dir) {
+		return Summary{}, fmt.Errorf("backup directory is not an absolute path: %q", opts.Dir)
+	}
+	if opts.CreateDir {
+		if err := os.MkdirAll(opts.Dir, 0o700); err != nil {
+			return Summary{}, fmt.Errorf("create backup directory: %w", err)
+		}
+	}
+
+	now := opts.Now.Local()
+	name := "passui-backup-" + now.Format("20060102-150405")
+	final := filepath.Join(opts.Dir, name+".tar.gz")
+	partial := filepath.Join(opts.Dir, "."+name+".tar.gz.partial")
+
+	f, err := os.OpenFile(partial, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return Summary{}, fmt.Errorf("create temporary file: %w", err)
+	}
+	// 正式な名前にできなかったら、一時ファイルを消す。
+	renamed, closed := false, false
+	defer func() {
+		if !closed {
+			f.Close()
+		}
+		if !renamed {
+			os.Remove(partial)
+		}
+	}()
+
+	if err := writeArchive(ctx, f, name, now, opts); err != nil {
+		return Summary{}, err
+	}
+	if err := f.Sync(); err != nil {
+		return Summary{}, fmt.Errorf("sync temporary file: %w", err)
+	}
+	closed = true
+	if err := f.Close(); err != nil {
+		return Summary{}, fmt.Errorf("close temporary file: %w", err)
+	}
+	// POSIX の rename は上書きするので、直前に同じ名前がないことを確かめる。
+	if _, err := os.Lstat(final); err == nil {
+		return Summary{}, fmt.Errorf("%s already exists", final)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return Summary{}, err
+	}
+	if err := os.Rename(partial, final); err != nil {
+		return Summary{}, fmt.Errorf("rename temporary file: %w", err)
+	}
+	renamed = true
+	return Summary{Path: final}, nil
+}
+
+// writeArchive は w に tar.gz を書く。中身はすべて top/ の下に置く。
+func writeArchive(ctx context.Context, w io.Writer, top string, now time.Time, opts Options) error {
+	gz := gzip.NewWriter(w)
+	tw := tar.NewWriter(gz)
+
+	if err := tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeDir, Name: top + "/", Mode: 0o700, ModTime: now,
+	}); err != nil {
+		return err
+	}
+	if err := writeReadme(tw, top, now, opts); err != nil {
+		return err
+	}
+	if err := writeStore(ctx, tw, path.Join(top, "store"), opts.StoreDir); err != nil {
+		return err
+	}
+
+	if err := tw.Close(); err != nil {
+		return err
+	}
+	return gz.Close()
+}
+
+func writeReadme(tw *tar.Writer, top string, now time.Time, opts Options) error {
+	var buf bytes.Buffer
+	if err := readmeTemplate.Execute(&buf, struct {
+		CreatedAt string
+		Version   string
+	}{
+		CreatedAt: now.Format("2006-01-02 15:04:05 -0700"),
+		Version:   opts.Version,
+	}); err != nil {
+		return err
+	}
+	if err := tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeReg, Name: path.Join(top, "README.txt"), Mode: 0o600,
+		Size: int64(buf.Len()), ModTime: now,
+	}); err != nil {
+		return err
+	}
+	_, err := tw.Write(buf.Bytes())
+	return err
+}
+
+// writeStore はストアのディレクトリと通常ファイルを prefix/ の下に書く。
+// パーミッションは tar のヘッダーに保つ。
+func writeStore(ctx context.Context, tw *tar.Writer, prefix, storeDir string) error {
+	return filepath.WalkDir(storeDir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(storeDir, p)
+		if err != nil {
+			return err
+		}
+		name := prefix
+		if rel != "." {
+			name = path.Join(prefix, filepath.ToSlash(rel))
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		switch {
+		case info.IsDir():
+			return writeHeader(tw, info, name+"/")
+		case info.Mode().IsRegular():
+			return writeFile(tw, info, name, p)
+		}
+		return nil
+	})
+}
+
+func writeHeader(tw *tar.Writer, info fs.FileInfo, name string) error {
+	h, err := tar.FileInfoHeader(info, "")
+	if err != nil {
+		return err
+	}
+	h.Name = name
+	return tw.WriteHeader(h)
+}
+
+func writeFile(tw *tar.Writer, info fs.FileInfo, name, p string) error {
+	f, err := os.Open(p)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := writeHeader(tw, info, name); err != nil {
+		return err
+	}
+	_, err = io.CopyN(tw, f, info.Size())
+	return err
+}

@@ -3,12 +3,14 @@
 package server
 
 import (
+	"context"
 	"embed"
 	"html/template"
 	"io/fs"
 	"log/slog"
 	"net/http"
 
+	"github.com/backpaper0/passui/internal/backup"
 	"github.com/backpaper0/passui/internal/secret"
 	"github.com/backpaper0/passui/internal/store"
 )
@@ -34,7 +36,15 @@ type Config struct {
 	Token secret.Value
 	// Store はストア バックエンド。
 	Store store.Backend
+	// BackupDir はバックアップ先（解決済みの絶対パス）。
+	BackupDir string
+	// Backup はバックアップを作ってバックアップ先に置く（POST /backup）。serve は
+	// backup.Write を包んだものを渡す。テストでは偽物に差し替える。
+	Backup BackupFunc
 }
+
+// BackupFunc はバックアップを作ってバックアップ先に置き、その要約を返す。
+type BackupFunc func(ctx context.Context) (backup.Summary, error)
 
 // New は passui の http.Handler を返す。すべてのルートに共通のミドルウェアが掛かり、
 // /login と /static/ 以外のルートにはログインが要る。
@@ -65,6 +75,7 @@ func (s *handler) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /entry/{name...}", s.entry)
 	mux.HandleFunc("GET /lock-status", s.lockStatus)
 	mux.HandleFunc("POST /lock", s.lock)
+	mux.HandleFunc("POST /backup", s.backup)
 	mux.HandleFunc("GET /new", s.newEntryForm)
 	mux.HandleFunc("POST /new", s.createEntry)
 	mux.HandleFunc("GET /edit/{name...}", s.editForm)

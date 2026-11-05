@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/backpaper0/passui/internal/backup"
 	"github.com/backpaper0/passui/internal/secret"
 	"github.com/backpaper0/passui/internal/server"
 	"github.com/backpaper0/passui/internal/store"
@@ -121,6 +122,27 @@ func serve(ctx context.Context, env environ, stderr io.Writer) int {
 	logger.Info("store", "dir", storeCfg.Dir, "gnupghome", storeCfg.GnupgHome)
 	backend := store.NewPass(storeCfg, logger)
 
+	// バックアップ先を決められなくても起動は止めない（バックアップを押したときに失敗する）。
+	backupDir, createBackupDir, backupDirErr := backupDir(env)
+	if backupDirErr != nil {
+		logger.Warn("cannot locate the backup directory", "err", backupDirErr)
+	} else {
+		logger.Info("backup", "dir", backupDir, "create", createBackupDir)
+	}
+	writeBackup := func(ctx context.Context) (backup.Summary, error) {
+		if backupDirErr != nil {
+			return backup.Summary{}, backupDirErr
+		}
+		return backup.Write(ctx, backup.Options{
+			StoreDir:  storeCfg.Dir,
+			Dir:       backupDir,
+			CreateDir: createBackupDir,
+			Now:       time.Now(),
+			Version:   Version,
+			Env:       storeCfg.Env,
+		})
+	}
+
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port))
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -145,7 +167,13 @@ func serve(ctx context.Context, env environ, stderr io.Writer) int {
 	}()
 
 	srv := &http.Server{
-		Handler:           server.New(server.Config{Port: cfg.Port, Token: token, Store: backend}, logger),
+		Handler: server.New(server.Config{
+			Port:      cfg.Port,
+			Token:     token,
+			Store:     backend,
+			BackupDir: backupDir,
+			Backup:    writeBackup,
+		}, logger),
 		ReadHeaderTimeout: 10 * time.Second,
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
 	}
