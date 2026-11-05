@@ -1,0 +1,14 @@
+{{define "backup-result"}}{{if .Path}}<div class="backup-result" role="status">
+<p>バックアップを置きました。</p>
+<p><code>{{.Path}}</code></p>
+</div>{{else if .Problem}}<div class="backup-result" role="alert">
+<p class="error">{{.Problem.Message}}</p>
+<p><code>{{.Problem.Path}}</code></p>
+<p>{{.Problem.Hint}}</p>
+</div>{{else if .UnresolvedKeys}}<div class="backup-result" role="alert">
+<p class="error">ストアの鍵が見つかりません: {{range $i, $id := .UnresolvedKeys}}{{if $i}}, {{end}}<code>{{$id}}</code>{{end}}</p>
+<p><code>.gpg-id</code> と <code>PASSWORD_STORE_KEY</code> を確かめてください。バックアップ先には何も置いていません。</p>
+</div>{{else}}<div class="backup-result" role="alert">
+<p class="error">{{.Failure}}</p>
+<p>ログでエラー ID を探してください。バックアップ先には何も置いていません。</p>
+</div>{{end}}{{end}}

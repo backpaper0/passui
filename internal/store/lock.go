@@ -50,7 +50,7 @@ func (p *Pass) locked(ctx context.Context, dir string) (bool, error) {
 // キャッシュされていない鍵に送っても失敗しない。gpg-agent のキャッシュはターミナルと
 // 共有なので、ターミナルの pass もロックされる。
 func (p *Pass) Lock(ctx context.Context) error {
-	ids, err := p.storeRecipients(ctx)
+	ids, err := KeyIDs(ctx, p.cfg.Dir)
 	if err != nil {
 		return err
 	}
@@ -103,11 +103,13 @@ func (p *Pass) recipients(dir string) []string {
 	}
 }
 
-// storeRecipients はストアの中のすべての .gpg-id（ルートとサブフォルダ）に書かれた鍵を、
-// 重複を除いて返す。読めない .gpg-id は飛ばし、1 つも読めなければ nil。
-func (p *Pass) storeRecipients(ctx context.Context) ([]string, error) {
+// KeyIDs は、ストアのディレクトリ storeDir の中のすべての .gpg-id（ルートとサブフォルダ）に
+// 書かれたストアの鍵の ID を、書かれた順に重複を除いて返す。読めない .gpg-id は飛ばし、
+// 1 つも読めなければ nil。ID は .gpg-id に書かれたまま（指紋とは限らない）。
+// ロックとバックアップが共有する。
+func KeyIDs(ctx context.Context, storeDir string) ([]string, error) {
 	var ids []string
-	err := p.walk(ctx, func(dir, rel string, files []fs.DirEntry) {
+	err := walkStore(ctx, storeDir, func(dir, rel string, files []fs.DirEntry) {
 		found, err := readGPGID(dir)
 		if err != nil {
 			return

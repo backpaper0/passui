@@ -1,0 +1,8 @@
+{{define "backup-button"}}<!-- バックアップは確認なしですぐ作る。ロック中でも同じ。右ペイン（詳細や編集中の入力）は確認なしで破棄する。
+     作成中は htmx がフォームに htmx-request を付け、ボタンを押せなくする（二重に作らないため）。
+     JS がなければ普通の POST になり、結果のページが返る。 -->
+<form class="backup-form" method="post" action="/backup"
+      hx-post="/backup" hx-target="#right-pane" hx-swap="innerHTML" hx-disabled-elt="find button">
+<button type="submit"><span class="backup-label">バックアップ</span><span class="backup-busy">作成中…</span></button>
+</form>
+{{end}}

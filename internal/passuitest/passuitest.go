@@ -7,6 +7,7 @@ package passuitest
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"io"
@@ -19,6 +20,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/backpaper0/passui/internal/backup"
 	"github.com/backpaper0/passui/internal/secret"
 	"github.com/backpaper0/passui/internal/server"
 	"github.com/backpaper0/passui/internal/store"
@@ -106,7 +108,13 @@ type Options struct {
 	// Store はストア バックエンド。nil なら空の FakeStore を使う。
 	// 統合テストでは NewGPGStore(...).Backend() を渡す。
 	Store store.Backend
+	// Backup はバックアップを作る関数（server.Config.Backup）。nil なら、何も書かずに
+	// FakeBackupPath を返す偽物を使う。
+	Backup server.BackupFunc
 }
+
+// FakeBackupPath は Options.Backup を省いたときの偽物が返すパス。
+const FakeBackupPath = "/passuitest/backup/passui-backup-20000101-000000.tar.gz"
 
 // Serve は server.New で Handler を組み立てる。既定ではログインまで済ませる。
 func (h *Harness) Serve(opts Options) *Server {
@@ -121,7 +129,18 @@ func (h *Harness) Serve(opts Options) *Server {
 	if opts.Store == nil {
 		opts.Store = NewFakeStore()
 	}
-	cfg := server.Config{Port: opts.Port, Token: secret.Of(opts.Token), Store: opts.Store}
+	if opts.Backup == nil {
+		opts.Backup = func(context.Context) (backup.Summary, error) {
+			return backup.Summary{Path: FakeBackupPath}, nil
+		}
+	}
+	cfg := server.Config{
+		Port:      opts.Port,
+		Token:     secret.Of(opts.Token),
+		Store:     opts.Store,
+		BackupDir: "/passuitest/backup",
+		Backup:    opts.Backup,
+	}
 	s := h.newServer(opts.Port, server.New(cfg, h.Logger))
 	s.Token = opts.Token
 	if !opts.Anonymous {

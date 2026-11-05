@@ -17,7 +17,7 @@ const DefaultPort = 3560
 
 // knownVars は passui が読む PASSUI_* の一覧。これ以外の PASSUI_* は警告する。
 // 設定を足すときはここにも足すこと。
-var knownVars = []string{"PASSUI_PORT", "PASSUI_LOG_LEVEL"}
+var knownVars = []string{"PASSUI_PORT", "PASSUI_LOG_LEVEL", "PASSUI_BACKUP_DIR"}
 
 // config は serve の設定。値はすべて環境変数から読む（フラグは持たない）。
 type config struct {
@@ -75,6 +75,12 @@ func loadConfig(env environ) (config, []string, error) {
 		}
 	}
 
+	// バックアップ先は絶対パスかだけ確かめる。存在は確かめず、作りもしない（ホスト側の
+	// フォルダが後から現れることもある）。値は backupDir で使う。
+	if v, ok := env.lookup("PASSUI_BACKUP_DIR"); ok && !filepath.IsAbs(v) {
+		return config{}, warnings, fmt.Errorf("PASSUI_BACKUP_DIR は絶対パスで指定してください: %q", v)
+	}
+
 	return cfg, warnings, nil
 }
 
@@ -109,6 +115,26 @@ func passConfig(env environ, passPath string) (store.PassConfig, error) {
 	}
 	sort.Strings(list)
 	return store.PassConfig{Pass: passPath, Dir: dir, GnupgHome: gnupg, Env: list}, nil
+}
+
+// backupDir はバックアップ先を env から決める。PASSUI_BACKUP_DIR があればそれを使い、
+// create（なければ作る）を false にする（絶対パスであることは loadConfig で確かめ済み）。
+// なければ既定の場所 ${XDG_DATA_HOME:-$HOME/.local/share}/passui/backup を使い、create を
+// true にする。XDG_DATA_HOME が絶対パスでなければ（XDG の仕様どおり）無視する。
+// ここではディレクトリの存在を確かめず、作りもしない（バックアップを作るときに作る）。
+func backupDir(env environ) (dir string, create bool, err error) {
+	if v, ok := env.lookup("PASSUI_BACKUP_DIR"); ok {
+		return v, false, nil
+	}
+	base, _ := env.lookup("XDG_DATA_HOME")
+	if !filepath.IsAbs(base) {
+		home, _ := env.lookup("HOME")
+		if home == "" {
+			return "", false, fmt.Errorf("HOME が空です（バックアップ先の既定値を決められません）")
+		}
+		base = filepath.Join(home, ".local", "share")
+	}
+	return filepath.Join(base, "passui", "backup"), true, nil
 }
 
 // lookPath は env の PATH から実行可能な name を探す（os.Getenv の PATH は見ない）。

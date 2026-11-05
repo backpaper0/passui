@@ -165,6 +165,12 @@ button.danger:hover,
 .lock-form { display: flex; flex-direction: row-reverse; align-items: center; gap: 0.5rem; }
 .lock-note { color: var(--ink-faint); font-size: 0.75rem; }
 
+/* バックアップ ボタン。作成中（htmx がフォームに htmx-request を付ける）は「作成中…」を出す。 */
+.backup-busy { display: none; }
+.backup-form.htmx-request .backup-label { display: none; }
+.backup-form.htmx-request .backup-busy { display: inline; }
+.backup-result code { overflow-wrap: anywhere; }
+
 /* ロック状態のバッジ */
 .badge {
   display: inline-flex;

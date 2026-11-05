@@ -11,5 +11,7 @@ passui は TTY のない systemd ユーザーサービスで、パスフレー�
 
 - `.gpg-id` の ID が解決できない、gpg / gpgconf の終了コードが 0 でない、`.key` が読めない、のどれかが起きたらバックアップ全体を失敗にします。`gpg --export*` は存在しない ID を黙って飛ばすため、件数の照合が要ります。
 - 主鍵がオフラインの鍵（`sec#`）は、秘密部分がある keygrip（暗号化サブ鍵など）の `.key` だけを写します。
+- 秘密部分があるかは、`gpg --list-secret-keys` の `sec`／`ssb` の第 15 フィールド（`#`）ではなく、`<keygrip>.key` があるかで決めます。gpg-agent は読めない `.key` も「ない」（`ssb#` など）と報告するため、第 15 フィールドに頼ると、読めない `.key` を黙って飛ばしたバックアップが成功してしまいます。`.key` がなければ飛ばし、あっても読めなければ失敗にします。
+- ストアの鍵が 1 つもない（`.gpg-id` のない）ストアでも、配置をそろえるため空の `public-keys.asc` と `ownertrust.txt` を入れます。空の `public-keys.asc` は `gpg --import` が失敗するので、復元の手順では鍵を取り込む手順を飛ばします。
 
 調査の詳細: [systemd サービスの passui から GPG 秘密鍵を書き出せるか](https://github.com/backpaper0/passui/issues/44)
