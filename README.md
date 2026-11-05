@@ -96,6 +96,7 @@ linger、`gpg-agent.socket`、env ファイル（`~/.config/passui/env`）には
 |---|---|---|
 | `PASSUI_PORT` | `3560` | 待ち受けるポート。使用中なら別のポートに逃げずにエラーで止まります。 |
 | `PASSUI_LOG_LEVEL` | `info` | `info` か `debug`。 |
+| `PASSUI_BACKUP_DIR` | `${XDG_DATA_HOME:-~/.local/share}/passui/backup` | バックアップ先。絶対パス。明示した場合、そのディレクトリがなければバックアップは失敗します。 |
 
 - 不正な値ならエラーで止まります（原因は journald に出ます）。知らない `PASSUI_*` は警告します。
 - 変更は `systemctl --user restart passui` で反映します。

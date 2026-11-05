@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -54,5 +55,22 @@ func TestServeUsesDefaultBackupDirectory(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(base, "passui")); err == nil {
 			t.Errorf("serve created a directory under %s", base)
 		}
+	}
+}
+
+func TestServeUsesExplicitBackupDirectoryWithoutCreatingIt(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "sync", "passui")
+
+	logs := serveUntilListen(t, "HOME="+home, "XDG_DATA_HOME="+t.TempDir(), "PASSUI_BACKUP_DIR="+dir)
+
+	if !strings.Contains(logs, "msg=backup dir="+dir+" create=false") {
+		t.Errorf("logs lack the explicit backup directory %s with create=false:\n%s", dir, logs)
+	}
+	if strings.Contains(logs, "unknown environment variable") {
+		t.Errorf("PASSUI_BACKUP_DIR is warned as unknown:\n%s", logs)
+	}
+	if _, err := os.Stat(filepath.Dir(dir)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("serve created the backup directory: %v", err)
 	}
 }

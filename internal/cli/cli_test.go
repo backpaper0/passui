@@ -102,12 +102,14 @@ func TestServeRejectsInvalidConfig(t *testing.T) {
 		{"PASSUI_PORT=65536", "PASSUI_PORT"},
 		{"PASSUI_PORT=", "PASSUI_PORT"},
 		{"PASSUI_LOG_LEVEL=trace", "PASSUI_LOG_LEVEL"},
+		{"PASSUI_BACKUP_DIR=backup", "PASSUI_BACKUP_DIR"},
+		{"PASSUI_BACKUP_DIR=", "PASSUI_BACKUP_DIR"},
 	} {
 		r := run(t, []string{path, tc.env}, "serve")
 		if r.code != 1 {
 			t.Errorf("%s: code = %d, want 1", tc.env, r.code)
 		}
-		if !strings.Contains(r.stderr, "level=ERROR") || !strings.Contains(r.stderr, tc.want) {
+		if !strings.Contains(r.stderr, `level=ERROR msg="invalid configuration"`) || !strings.Contains(r.stderr, tc.want) {
 			t.Errorf("%s: stderr lacks an error about %s:\n%s", tc.env, tc.want, r.stderr)
 		}
 	}

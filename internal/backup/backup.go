@@ -16,6 +16,7 @@ import (
 	"path"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"text/template"
 	"time"
 )
@@ -44,6 +45,17 @@ type Summary struct {
 	Path string
 }
 
+// Write が返す番兵エラー。*fs.PathError に包んで返すので、呼び出し側は errors.Is で
+// 出し分け、errors.As で *fs.PathError の Path（問題のパス）を取り出せる。
+var (
+	// ErrNoDir: 「なければ作る」が偽で、バックアップ先がない。Path はバックアップ先。
+	ErrNoDir = errors.New("backup directory does not exist")
+	// ErrNotWritable: バックアップ先に書けない。Path はバックアップ先。
+	ErrNotWritable = errors.New("backup directory is not writable")
+	// ErrExists: 同じ名前のファイルがすでにある（上書きしない）。Path はそのファイル。
+	ErrExists = errors.New("backup file already exists")
+)
+
 // mu はバックアップの作成をプロセス内で直列化する。
 var mu sync.Mutex
 
@@ -66,8 +78,13 @@ func Write(ctx context.Context, opts Options) (Summary, error) {
 	}
 	if opts.CreateDir {
 		if err := os.MkdirAll(opts.Dir, 0o700); err != nil {
+			if isNotWritable(err) {
+				return Summary{}, notWritable(opts.Dir, err)
+			}
 			return Summary{}, fmt.Errorf("create backup directory: %w", err)
 		}
+	} else if _, err := os.Stat(opts.Dir); errors.Is(err, fs.ErrNotExist) {
+		return Summary{}, &fs.PathError{Op: "backup", Path: opts.Dir, Err: ErrNoDir}
 	}
 
 	now := opts.Now.Local()
@@ -77,6 +94,9 @@ func Write(ctx context.Context, opts Options) (Summary, error) {
 
 	f, err := os.OpenFile(partial, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
+		if isNotWritable(err) {
+			return Summary{}, notWritable(opts.Dir, err)
+		}
 		return Summary{}, fmt.Errorf("create temporary file: %w", err)
 	}
 	// 正式な名前にできなかったら、一時ファイルを消す。
@@ -102,7 +122,7 @@ func Write(ctx context.Context, opts Options) (Summary, error) {
 	}
 	// POSIX の rename は上書きするので、直前に同じ名前がないことを確かめる。
 	if _, err := os.Lstat(final); err == nil {
-		return Summary{}, fmt.Errorf("%s already exists", final)
+		return Summary{}, &fs.PathError{Op: "backup", Path: final, Err: ErrExists}
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return Summary{}, err
 	}
@@ -111,6 +131,16 @@ func Write(ctx context.Context, opts Options) (Summary, error) {
 	}
 	renamed = true
 	return Summary{Path: final}, nil
+}
+
+// isNotWritable は err が権限や読み取り専用のファイルシステムのせいで書けないことを表すか。
+func isNotWritable(err error) bool {
+	return errors.Is(err, fs.ErrPermission) || errors.Is(err, syscall.EROFS)
+}
+
+// notWritable は dir に書けないことを表す ErrNotWritable を、原因 cause をログ用に残して返す。
+func notWritable(dir string, cause error) error {
+	return &fs.PathError{Op: "backup", Path: dir, Err: fmt.Errorf("%w: %w", ErrNotWritable, cause)}
 }
 
 // writeArchive は w に tar.gz を書く。中身はすべて top/ の下に置く。

@@ -3,6 +3,8 @@ package server_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io/fs"
 	"net/http"
 	"strings"
 	"testing"
@@ -123,6 +125,59 @@ func TestBackupFailureShowsOnlyErrorID(t *testing.T) {
 		logs := h.Logs()
 		if !strings.Contains(logs, "error_id=") || !strings.Contains(logs, "gpg: boom") {
 			t.Errorf("htmx=%v: logs lack the error ID and the cause:\n%s", htmx, logs)
+		}
+	}
+}
+
+func TestBackupExplainsDestinationProblems(t *testing.T) {
+	const dir = "/mnt/sync/passui"
+	for _, tc := range []struct {
+		name string
+		err  error
+		want []string
+	}{
+		{
+			"no directory",
+			&fs.PathError{Op: "backup", Path: dir, Err: backup.ErrNoDir},
+			[]string{"バックアップ先がありません。", dir, "passui は明示したバックアップ先を作りません。パスの打ち間違いやマウントを確かめてください。"},
+		},
+		{
+			"not writable",
+			&fs.PathError{Op: "backup", Path: dir, Err: fmt.Errorf("%w: permission denied", backup.ErrNotWritable)},
+			[]string{"バックアップ先に書けません。", dir, "ディレクトリの権限を確かめてください。"},
+		},
+		{
+			"exists",
+			&fs.PathError{Op: "backup", Path: backupPath, Err: backup.ErrExists},
+			[]string{"同じ名前のファイルがすでにあります。", backupPath, "上書きはしません。少し待ってから、もう一度押してください。"},
+		},
+	} {
+		for _, htmx := range []bool{true, false} {
+			h := passuitest.New(t)
+			fake := &fakeBackup{err: tc.err}
+			srv := h.Serve(passuitest.Options{Backup: fake.Backup})
+
+			res, body := postBackup(t, srv, htmx)
+
+			if res.StatusCode != http.StatusConflict {
+				t.Errorf("%s htmx=%v: status = %d, want 409:\n%s", tc.name, htmx, res.StatusCode, body)
+			}
+			for _, s := range tc.want {
+				if !strings.Contains(body, s) {
+					t.Errorf("%s htmx=%v: body lacks %q:\n%s", tc.name, htmx, s, body)
+				}
+			}
+			for _, s := range []string{"エラー ID", "permission denied"} {
+				if strings.Contains(body, s) {
+					t.Errorf("%s htmx=%v: body contains %q:\n%s", tc.name, htmx, s, body)
+				}
+			}
+			if got := strings.Contains(body, "<html"); got != !htmx {
+				t.Errorf("%s htmx=%v: full page = %v:\n%s", tc.name, htmx, got, body)
+			}
+			if !htmx && !strings.Contains(body, "トップに戻る") {
+				t.Errorf("%s: page lacks a link to top:\n%s", tc.name, body)
+			}
 		}
 	}
 }

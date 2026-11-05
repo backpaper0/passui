@@ -2,7 +2,10 @@ package server
 
 import (
 	"errors"
+	"io/fs"
 	"net/http"
+
+	"github.com/backpaper0/passui/internal/backup"
 )
 
 // backupData は backup-result（バックアップの結果）に渡す。
@@ -11,6 +14,36 @@ type backupData struct {
 	Path string
 	// Failure は失敗したときのメッセージ（エラー ID 付き）。
 	Failure string
+	// Problem は、利用者が直せる失敗（バックアップ先の問題）のときの説明。
+	Problem *backupProblem
+}
+
+// backupProblem は、何が悪いか（Message）、問題のパス（Path）、直し方（Hint）。
+type backupProblem struct {
+	Message string
+	Path    string
+	Hint    string
+}
+
+// destinationProblem は、err がバックアップ先の問題（backup.ErrNoDir・ErrNotWritable・
+// ErrExists）なら、その説明を返す。パスは err の *fs.PathError から取り、なければ dir を使う。
+func destinationProblem(err error, dir string) *backupProblem {
+	path := dir
+	var pe *fs.PathError
+	if errors.As(err, &pe) {
+		path = pe.Path
+	}
+	switch {
+	case errors.Is(err, backup.ErrNoDir):
+		return &backupProblem{"バックアップ先がありません。", path,
+			"passui は明示したバックアップ先を作りません。パスの打ち間違いやマウントを確かめてください。"}
+	case errors.Is(err, backup.ErrNotWritable):
+		return &backupProblem{"バックアップ先に書けません。", path, "ディレクトリの権限を確かめてください。"}
+	case errors.Is(err, backup.ErrExists):
+		return &backupProblem{"同じ名前のファイルがすでにあります。", path,
+			"上書きはしません。少し待ってから、もう一度押してください。"}
+	}
+	return nil
 }
 
 // backup は POST /backup（ヘッダーのバックアップ ボタン）。確認なしですぐバックアップを
@@ -34,6 +67,10 @@ func (s *handler) runBackup(r *http.Request) (int, backupData) {
 		return http.StatusInternalServerError, backupData{Failure: failureMessage(id)}
 	}
 	sum, err := s.cfg.Backup(r.Context())
+	if p := destinationProblem(err, s.cfg.BackupDir); p != nil {
+		s.logger.WarnContext(r.Context(), "backup failed", "op", "backup", "path", p.Path, "err", err)
+		return http.StatusConflict, backupData{Problem: p}
+	}
 	if err != nil {
 		id := logFailure(r.Context(), s.logger, "backup", "dir", s.cfg.BackupDir, "err", err)
 		return http.StatusInternalServerError, backupData{Failure: failureMessage(id)}

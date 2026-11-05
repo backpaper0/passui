@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,6 +69,15 @@ func readArchive(t *testing.T, path string) map[string]entry {
 		}
 		got[h.Name] = entry{h, string(b)}
 	}
+}
+
+// errorPath は Write のエラーが指すパス（*fs.PathError の Path）を返す。
+func errorPath(err error) string {
+	var pe *fs.PathError
+	if errors.As(err, &pe) {
+		return pe.Path
+	}
+	return ""
 }
 
 func listDir(t *testing.T, dir string) []string {
@@ -196,11 +206,48 @@ func TestWriteDoesNotCreateMissingDestinationUnlessAsked(t *testing.T) {
 	storeDir := newStore(t, map[string]string{"bank.gpg": "x"})
 	dest := filepath.Join(t.TempDir(), "missing")
 
-	if _, err := backup.Write(t.Context(), backup.Options{StoreDir: storeDir, Dir: dest, Now: at}); err == nil {
-		t.Fatal("Write succeeded, want an error")
+	_, err := backup.Write(t.Context(), backup.Options{StoreDir: storeDir, Dir: dest, Now: at})
+	if !errors.Is(err, backup.ErrNoDir) {
+		t.Fatalf("err = %v, want ErrNoDir", err)
+	}
+	if path := errorPath(err); path != dest {
+		t.Errorf("error path = %q, want %q", path, dest)
 	}
 	if _, err := os.Stat(dest); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("destination was created: %v", err)
+	}
+}
+
+func TestWriteReportsUnwritableDestination(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can write without permission")
+	}
+	storeDir := newStore(t, map[string]string{"bank.gpg": "x"})
+	readOnly := t.TempDir()
+	if err := os.Chmod(readOnly, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(readOnly, 0o700) })
+
+	for _, tc := range []struct {
+		name   string
+		dir    string
+		create bool
+	}{
+		{"existing read-only directory", readOnly, false},
+		{"existing read-only directory, create", readOnly, true},
+		{"cannot create under read-only parent", filepath.Join(readOnly, "backup"), true},
+	} {
+		_, err := backup.Write(t.Context(), backup.Options{StoreDir: storeDir, Dir: tc.dir, CreateDir: tc.create, Now: at})
+		if !errors.Is(err, backup.ErrNotWritable) {
+			t.Errorf("%s: err = %v, want ErrNotWritable", tc.name, err)
+		}
+		if path := errorPath(err); path != tc.dir {
+			t.Errorf("%s: error path = %q, want %q", tc.name, path, tc.dir)
+		}
+	}
+	if names := listDir(t, readOnly); len(names) != 0 {
+		t.Errorf("destination has %v, want nothing", names)
 	}
 }
 
@@ -226,8 +273,12 @@ func TestWriteDoesNotOverwriteAnExistingBackup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := backup.Write(t.Context(), backup.Options{StoreDir: storeDir, Dir: dest, Now: at}); err == nil {
-		t.Fatal("Write succeeded, want an error")
+	_, err := backup.Write(t.Context(), backup.Options{StoreDir: storeDir, Dir: dest, Now: at})
+	if !errors.Is(err, backup.ErrExists) {
+		t.Fatalf("err = %v, want ErrExists", err)
+	}
+	if path := errorPath(err); path != existing {
+		t.Errorf("error path = %q, want %q", path, existing)
 	}
 	if b, _ := os.ReadFile(existing); string(b) != "older backup" {
 		t.Errorf("existing backup was changed: %q", b)
