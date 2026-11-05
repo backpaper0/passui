@@ -39,6 +39,8 @@ const help = `passui - password-store をブラウザから管理する Web ツ�
 設定（環境変数）:
   PASSUI_PORT       待ち受けるポート（既定: 3560）
   PASSUI_LOG_LEVEL  info または debug（既定: info）
+  PASSUI_BACKUP_DIR バックアップ先。絶対パス
+                    （既定: ${XDG_DATA_HOME:-~/.local/share}/passui/backup）
   サービスでは ~/.config/passui/env に KEY=VALUE で書く。
 `
 
