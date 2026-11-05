@@ -15,8 +15,9 @@ gnupg を入れ、元のパスフレーズを用意してから、バックア�
 
 3. ストアの鍵の公開鍵を取り込みます。
 
-       gpg --batch --import gnupg/public-keys.asc
-
+{{if .Keys}}       gpg --batch --import gnupg/public-keys.asc
+{{else}}   このバックアップにはストアの鍵が入っていないので、飛ばします。
+{{end}}
 4. 秘密鍵（.key）を gpg-agent の鍵ファイルの場所に写し、gpg-agent に読み直させます。
 
 {{if .HasSecrets}}       dir="$(gpgconf --list-dirs homedir)/private-keys-v1.d"
@@ -27,8 +28,9 @@ gnupg を入れ、元のパスフレーズを用意してから、バックア�
 {{end}}
 5. ストアの鍵の ownertrust を取り込みます。
 
-       gpg --batch --import-ownertrust gnupg/ownertrust.txt
-
+{{if .Keys}}       gpg --batch --import-ownertrust gnupg/ownertrust.txt
+{{else}}   このバックアップにはストアの鍵が入っていないので、飛ばします。
+{{end}}
 6. ストアを置きます。
 
        cp -a store "${PASSWORD_STORE_DIR:-$HOME/.password-store}"
@@ -40,8 +42,8 @@ gnupg を入れ、元のパスフレーズを用意してから、バックア�
 
 {{range .Keys}}{{if .Secrets}}       gpg --list-secret-keys {{.Fingerprint}}
        echo test | gpg --batch -e -r {{.Fingerprint}} >/dev/null
-{{end}}{{end}}       pass show <エントリ>
-       git -C "${PASSWORD_STORE_DIR:-$HOME/.password-store}" log -1
+{{end}}{{end}}{{if .Keys}}       pass show <エントリ>
+{{end}}       git -C "${PASSWORD_STORE_DIR:-$HOME/.password-store}" log -1
 
 8. 後片付けとして、展開したディレクトリを消します（秘密鍵が入っています）。
 

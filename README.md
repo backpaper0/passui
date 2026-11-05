@@ -181,7 +181,7 @@ gnupg を入れ、元のパスフレーズを用意してから、バックア�
        rm -rf passui-backup-<日時>
 <!-- backup-steps:end -->
 
-鍵の数だけ、`install` の行（keygrip ごと）と、`gpg --list-secret-keys`・`gpg -e` の行（秘密鍵のある鍵ごと）が並びます。秘密鍵が 1 つもないバックアップでは、4 の手順は飛ばします。
+鍵の数だけ、`install` の行（keygrip ごと）と、`gpg --list-secret-keys`・`gpg -e` の行（秘密鍵のある鍵ごと）が並びます。秘密鍵が 1 つもないバックアップでは、4 の手順は飛ばします。ストアの鍵が 1 つもないバックアップ（`.gpg-id` のないストア）では、3〜5 の手順と `pass show` も飛ばします。
 
 ## ログ
 

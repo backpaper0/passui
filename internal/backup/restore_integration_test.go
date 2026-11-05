@@ -87,6 +87,25 @@ func (g *guest) env() []string {
 	return append(env, "HOME="+g.home, "GNUPGHOME="+g.gnupgHome, "PASSWORD_STORE_DIR="+g.storeDir, "LC_ALL=C")
 }
 
+// runRestoreSteps は README.txt の復元の手順のコマンドを、書かれたとおりに ng で、
+// バックアップのファイルがあるディレクトリ dir で実行し、出力を返す。手順に書いてあるとおり、
+// エントリの印だけは entry に置き換える。失敗したらテストを止める。
+func runRestoreSteps(t *testing.T, ng *guest, dir, readme, entry string) string {
+	t.Helper()
+	cmds := restoreCommands(t, readme)
+	script := "set -eu\n" + strings.ReplaceAll(strings.Join(cmds, "\n"), "<エントリ>", entry) + "\n"
+	cmd := exec.Command("sh", "-c", script)
+	cmd.Dir = dir
+	cmd.Env = ng.env()
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("restore steps failed: %v\n--- script\n%s--- output\n%s", err, script, out.String())
+	}
+	return out.String()
+}
+
 // バックアップの README.txt の復元の手順を、そのとおりに別の使い捨てのゲストで実行すると、
 // 元のパスフレーズで pass show が通り、ownertrust が効いて gpg -e -r <指紋> が通る。
 func TestIntegrationRestoreStepsInReadmeRoundTrip(t *testing.T) {
@@ -111,31 +130,56 @@ func TestIntegrationRestoreStepsInReadmeRoundTrip(t *testing.T) {
 		t.Fatalf("Write: %v", err)
 	}
 	readme := readArchive(t, sum.Path)[keysTop+"README.txt"].body
-	cmds := restoreCommands(t, readme)
-
-	// エントリの印だけを、ストアにあるエントリの名前に置き換える（手順に書いてあるとおり）。
-	script := "set -eu\n" + strings.ReplaceAll(strings.Join(cmds, "\n"), "<エントリ>", "bank") + "\n"
 	ng := newGuest(t, g.Passphrase())
-	cmd := exec.Command("sh", "-c", script)
-	cmd.Dir = dest
-	cmd.Env = ng.env()
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("restore steps failed: %v\n--- script\n%s--- output\n%s", err, script, out.String())
-	}
+	out := runRestoreSteps(t, ng, dest, readme, "bank")
 
-	if !strings.Contains(out.String(), secret) {
-		t.Errorf("pass show did not print the entry:\n%s", out.String())
+	if !strings.Contains(out, secret) {
+		t.Errorf("pass show did not print the entry:\n%s", out)
 	}
-	if !strings.Contains(out.String(), "restore roundtrip") {
-		t.Errorf("git log -1 did not show the last commit:\n%s", out.String())
+	if !strings.Contains(out, "restore roundtrip") {
+		t.Errorf("git log -1 did not show the last commit:\n%s", out)
 	}
 	if _, err := os.Stat(filepath.Join(ng.storeDir, "bank.gpg")); err != nil {
 		t.Errorf("restored store lacks bank.gpg: %v", err)
 	}
 	if names := listDir(t, dest); len(names) != 1 {
 		t.Errorf("destination has %v after cleanup, want only the archive", names)
+	}
+}
+
+// .gpg-id のない（ストアの鍵が 1 つもない）ストアのバックアップでも、README.txt の
+// 復元の手順はそのとおりに最後まで通り、ストアが戻る。
+func TestIntegrationRestoreStepsWithoutStoreKeysRunCleanly(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not found")
+	}
+	h := passuitest.New(t)
+	g := passuitest.NewGPGStore(h)
+	if err := os.Remove(filepath.Join(g.Dir, ".gpg-id")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(g.Dir, "notes.txt"), []byte("plain\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	g.Run("", "git", "-C", g.Dir, "init", "-q")
+	g.Run("", "git", "-C", g.Dir, "add", "-A")
+	g.Run("", "git", "-C", g.Dir, "-c", "user.name=passui", "-c", "user.email=passui@example.invalid",
+		"-c", "commit.gpgsign=false", "commit", "-q", "-m", "no store keys")
+
+	dest := t.TempDir()
+	sum, err := backup.Write(t.Context(), backup.Options{
+		StoreDir: g.Dir, Dir: dest, Now: at, Version: "dev", Env: g.Env(),
+	})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if len(sum.Keys) != 0 {
+		t.Fatalf("store keys = %v, want none", sum.Keys)
+	}
+	readme := readArchive(t, sum.Path)[keysTop+"README.txt"].body
+	out := runRestoreSteps(t, newGuest(t, g.Passphrase()), dest, readme, "notes")
+
+	if !strings.Contains(out, "no store keys") {
+		t.Errorf("git log -1 did not show the last commit:\n%s", out)
 	}
 }

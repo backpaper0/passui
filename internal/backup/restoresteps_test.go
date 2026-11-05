@@ -58,3 +58,23 @@ func TestRestoreStepsSkipSecretKeysWhenBackupHasNone(t *testing.T) {
 		t.Errorf("steps lack the archive name:\n%s", got)
 	}
 }
+
+// ストアの鍵が 1 つもないバックアップ（.gpg-id のないストア）では、空の public-keys.asc を
+// 取り込もうとして gpg が失敗しないよう、鍵を取り込む手順はどれも飛ばすと書く。
+func TestRestoreStepsSkipKeysWhenBackupHasNone(t *testing.T) {
+	got, err := renderRestoreSteps(restoreSteps{Name: "passui-backup-20261105-090807"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(got, "このバックアップにはストアの鍵が入っていないので、飛ばします。"); n != 2 {
+		t.Errorf("steps say the store keys are skipped %d times, want 2 (public keys and ownertrust):\n%s", n, got)
+	}
+	for _, s := range []string{"--import", "pass show", "gpgconf"} {
+		if strings.Contains(got, s) {
+			t.Errorf("steps have %q though there is no store key:\n%s", s, got)
+		}
+	}
+	if !strings.Contains(got, "cp -a store ") {
+		t.Errorf("steps lack putting the store:\n%s", got)
+	}
+}
