@@ -74,7 +74,7 @@ func NewGPGStore(h *Harness) *GPGStore {
 
 	g.must(g.passphrase+"\n", "gpg", "--batch", "--pinentry-mode", "loopback", "--passphrase-fd", "0",
 		"--quick-gen-key", "passui test <passui-test@example.invalid>", "future-default", "default", "never")
-	g.KeyID = g.fingerprint()
+	g.KeyID = g.fingerprint("--list-secret-keys")
 	g.must("", "pass", "init", g.KeyID)
 	g.must("probe", "gpg", "--batch", "--trust-model", "always", "--encrypt", "--recipient", g.KeyID, "--output", g.probe)
 	g.Lock()
@@ -148,9 +148,61 @@ func (g *GPGStore) Unlock() {
 		"--decrypt", "--output", os.DevNull, g.probe)
 }
 
-func (g *GPGStore) fingerprint() string {
+// AddKey は GNUPGHOME に、パスフレーズ付きの鍵（秘密鍵あり）を 1 つ足し、指紋を返す。
+// label は uid とパスフレーズのカナリアに使う。ownertrust は gpg の既定どおり ultimate になる。
+func (g *GPGStore) AddKey(label string) string {
 	g.h.t.Helper()
-	cmd := g.command("gpg", "--batch", "--with-colons", "--list-secret-keys")
+	uid := "passui " + label + " <" + label + "@example.invalid>"
+	g.must(g.h.Canary(label)+"\n", "gpg", "--batch", "--pinentry-mode", "loopback", "--passphrase-fd", "0",
+		"--quick-gen-key", uid, "future-default", "default", "never")
+	return g.fingerprint("--list-secret-keys", "--", uid)
+}
+
+// AddPublicKey は、別の使い捨ての GNUPGHOME で作った鍵の公開鍵だけを GNUPGHOME に
+// 取り込み、指紋を返す（ゲストに秘密鍵のないストアの鍵）。ownertrust は設定しない。
+func (g *GPGStore) AddPublicKey(label string) string {
+	g.h.t.Helper()
+	t := g.h.t
+	home, err := os.MkdirTemp(shortTempDir(), "passui-pub-")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	other := &GPGStore{h: g.h, Dir: g.Dir, GnupgHome: home}
+	t.Cleanup(func() {
+		_ = other.command("gpgconf", "--kill", "gpg-agent").Run()
+		_ = os.RemoveAll(home)
+	})
+	if err := os.Chmod(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	uid := "passui " + label + " <" + label + "@example.invalid>"
+	other.must("", "gpg", "--batch", "--pinentry-mode", "loopback", "--passphrase", "",
+		"--quick-gen-key", uid, "future-default", "default", "never")
+	pub := filepath.Join(home, "public.asc")
+	other.must("", "gpg", "--batch", "--armor", "--output", pub, "--export", "--", uid)
+	g.must("", "gpg", "--batch", "--import", pub)
+	return g.fingerprint("--list-keys", "--", uid)
+}
+
+// Run は、このストアの環境で name を stdin 付きで実行し、stdout を返す。失敗したら
+// テストを止める。stdin はシークレットでもよい（失敗のメッセージには入れない）。
+func (g *GPGStore) Run(stdin, name string, args ...string) string {
+	g.h.t.Helper()
+	cmd := g.command(name, args...)
+	cmd.Stdin = strings.NewReader(stdin)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		g.h.t.Fatalf("%s %s: %v: %s", name, strings.Join(args, " "), err, stderr.String())
+	}
+	return string(out)
+}
+
+// fingerprint は gpg --with-colons <args> の最初の鍵の主鍵の指紋を返す。
+func (g *GPGStore) fingerprint(args ...string) string {
+	g.h.t.Helper()
+	cmd := g.command("gpg", append([]string{"--batch", "--with-colons"}, args...)...)
 	out, err := cmd.Output()
 	if err != nil {
 		g.h.t.Fatalf("list keys: %v", err)

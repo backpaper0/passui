@@ -14,6 +14,8 @@ type backupData struct {
 	Path string
 	// Failure は失敗したときのメッセージ（エラー ID 付き）。
 	Failure string
+	// UnresolvedKeys は、公開鍵に解決できなかったストアの鍵の ID（秘密ではない）。
+	UnresolvedKeys []string
 	// Problem は、利用者が直せる失敗（バックアップ先の問題）のときの説明。
 	Problem *backupProblem
 }
@@ -71,10 +73,16 @@ func (s *handler) runBackup(r *http.Request) (int, backupData) {
 		s.logger.WarnContext(r.Context(), "backup failed", "op", "backup", "path", p.Path, "err", err)
 		return http.StatusConflict, backupData{Problem: p}
 	}
+	var unresolved *backup.UnresolvedKeysError
+	if errors.As(err, &unresolved) {
+		s.logger.WarnContext(r.Context(), "backup failed", "op", "backup", "unresolved_keys", unresolved.IDs)
+		return http.StatusConflict, backupData{UnresolvedKeys: unresolved.IDs}
+	}
 	if err != nil {
 		id := logFailure(r.Context(), s.logger, "backup", "dir", s.cfg.BackupDir, "err", err)
 		return http.StatusInternalServerError, backupData{Failure: failureMessage(id)}
 	}
-	s.logOperation(r, "backup", "", "path", sum.Path, "skipped_special_files", sum.SkippedSpecialFiles)
+	s.logOperation(r, "backup", "", "path", sum.Path, "store_keys", len(sum.Keys), "skipped_special_files", sum.SkippedSpecialFiles)
+	s.logger.DebugContext(r.Context(), "backup store keys", "fingerprints", sum.Keys)
 	return http.StatusOK, backupData{Path: sum.Path}
 }

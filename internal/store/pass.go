@@ -79,12 +79,17 @@ func (p *Pass) Entries(ctx context.Context) ([]string, error) {
 // 入らない。シンボリックリンクのディレクトリもたどるが、祖先を指すリンク（循環）は
 // たどらない。リンク先がないリンクは無視する。ストアのディレクトリがなければ何もしない。
 func (p *Pass) walk(ctx context.Context, visit func(dir, rel string, files []fs.DirEntry)) error {
-	root, err := os.Stat(p.cfg.Dir)
+	return walkStore(ctx, p.cfg.Dir, visit)
+}
+
+// walkStore は walk の本体。storeDir はストアのディレクトリ。
+func walkStore(ctx context.Context, storeDir string, visit func(dir, rel string, files []fs.DirEntry)) error {
+	root, err := os.Stat(storeDir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	if err == nil {
-		err = p.walkDir(ctx, p.cfg.Dir, "", []fs.FileInfo{root}, visit)
+		err = walkDir(ctx, storeDir, "", []fs.FileInfo{root}, visit)
 	}
 	if err != nil {
 		return fmt.Errorf("walk store: %w", err)
@@ -93,7 +98,7 @@ func (p *Pass) walk(ctx context.Context, visit func(dir, rel string, files []fs.
 }
 
 // walkDir は walk の再帰。ancestors は dir とその祖先で、循環の検出に使う。
-func (p *Pass) walkDir(ctx context.Context, dir, rel string, ancestors []fs.FileInfo, visit func(dir, rel string, files []fs.DirEntry)) error {
+func walkDir(ctx context.Context, dir, rel string, ancestors []fs.FileInfo, visit func(dir, rel string, files []fs.DirEntry)) error {
 	des, err := os.ReadDir(dir)
 	if err != nil {
 		return err
@@ -130,7 +135,7 @@ func (p *Pass) walkDir(ctx context.Context, dir, rel string, ancestors []fs.File
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := p.walkDir(ctx, s.dir, s.rel, append(slices.Clip(ancestors), s.fi), visit); err != nil {
+		if err := walkDir(ctx, s.dir, s.rel, append(slices.Clip(ancestors), s.fi), visit); err != nil {
 			return err
 		}
 	}

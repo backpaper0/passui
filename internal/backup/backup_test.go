@@ -97,7 +97,7 @@ func listDir(t *testing.T, dir string) []string {
 
 func TestWritePutsStoreAndReadmeIntoArchiveNamedByTime(t *testing.T) {
 	storeDir := newStore(t, map[string]string{
-		".gpg-id":           "ABCDEF\n",
+		".extensions/x":     "echo x\n",
 		"bank.gpg":          "ciphertext-bank",
 		"email/work.gpg":    "ciphertext-work",
 		".git/HEAD":         "ref: refs/heads/main\n",
@@ -133,7 +133,7 @@ func TestWritePutsStoreAndReadmeIntoArchiveNamedByTime(t *testing.T) {
 	got := readArchive(t, want)
 	const top = "passui-backup-20261105-090807/"
 	for name, body := range map[string]string{
-		"store/.gpg-id":           "ABCDEF\n",
+		"store/.extensions/x":     "echo x\n",
 		"store/bank.gpg":          "ciphertext-bank",
 		"store/email/work.gpg":    "ciphertext-work",
 		"store/.git/HEAD":         "ref: refs/heads/main\n",
