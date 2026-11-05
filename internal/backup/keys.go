@@ -70,10 +70,12 @@ func lookPath(env []string, name string) string {
 	return name
 }
 
-// run は gpg --batch <args> を呼び、stdout を返す。終了コードが 0 でなければ、
-// stderr を含むエラーを返す（呼び出し側がログに出す）。
+// run は gpg --batch --no-auto-check-trustdb <args> を呼び、stdout を返す。終了コードが
+// 0 でなければ、stderr を含むエラーを返す（呼び出し側がログに出す）。
+// --no-auto-check-trustdb は、一覧を出すついでに trustdb を検査して trustdb.gpg を
+// 書き換えないため（バックアップは取るだけで、gpg の状態を変えない）。
 func (g *gpg) run(ctx context.Context, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, g.prog, append([]string{"--batch"}, args...)...)
+	cmd := exec.CommandContext(ctx, g.prog, append([]string{"--batch", "--no-auto-check-trustdb"}, args...)...)
 	cmd.Env = g.env
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
