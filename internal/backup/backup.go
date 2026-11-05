@@ -42,6 +42,9 @@ type Options struct {
 type Summary struct {
 	// Path は置いたバックアップの完全なパス。
 	Path string
+	// SkippedSpecialFiles は、通常ファイル・ディレクトリ・シンボリックリンクのどれでもない
+	// ため、ストアから飛ばしたファイル（ソケットなど）の数。
+	SkippedSpecialFiles int
 }
 
 // mu はバックアップの作成をプロセス内で直列化する。
@@ -90,7 +93,8 @@ func Write(ctx context.Context, opts Options) (Summary, error) {
 		}
 	}()
 
-	if err := writeArchive(ctx, f, name, now, opts); err != nil {
+	skipped, err := writeArchive(ctx, f, name, now, opts)
+	if err != nil {
 		return Summary{}, err
 	}
 	if err := f.Sync(); err != nil {
@@ -110,41 +114,50 @@ func Write(ctx context.Context, opts Options) (Summary, error) {
 		return Summary{}, fmt.Errorf("rename temporary file: %w", err)
 	}
 	renamed = true
-	return Summary{Path: final}, nil
+	return Summary{Path: final, SkippedSpecialFiles: len(skipped)}, nil
 }
 
 // writeArchive は w に tar.gz を書く。中身はすべて top/ の下に置く。
-func writeArchive(ctx context.Context, w io.Writer, top string, now time.Time, opts Options) error {
+// ストアから飛ばした特殊ファイルの、アーカイブの中でのパス（top/ からの相対）を返す。
+func writeArchive(ctx context.Context, w io.Writer, top string, now time.Time, opts Options) ([]string, error) {
 	gz := gzip.NewWriter(w)
 	tw := tar.NewWriter(gz)
 
 	if err := tw.WriteHeader(&tar.Header{
 		Typeflag: tar.TypeDir, Name: top + "/", Mode: 0o700, ModTime: now,
 	}); err != nil {
-		return err
+		return nil, err
 	}
-	if err := writeReadme(tw, top, now, opts); err != nil {
-		return err
+	skipped, err := writeStore(ctx, tw, top, "store", opts.StoreDir)
+	if err != nil {
+		return nil, err
 	}
-	if err := writeStore(ctx, tw, path.Join(top, "store"), opts.StoreDir); err != nil {
-		return err
+	// 飛ばしたものを書くので、README.txt はストアの後に書く。
+	if err := writeReadme(tw, top, readmeData{
+		CreatedAt: now.Format("2006-01-02 15:04:05 -0700"),
+		Version:   opts.Version,
+		Skipped:   skipped,
+	}, now); err != nil {
+		return nil, err
 	}
 
 	if err := tw.Close(); err != nil {
-		return err
+		return nil, err
 	}
-	return gz.Close()
+	return skipped, gz.Close()
 }
 
-func writeReadme(tw *tar.Writer, top string, now time.Time, opts Options) error {
+// readmeData は README.txt のテンプレートに渡す。
+type readmeData struct {
+	CreatedAt string
+	Version   string
+	// Skipped はストアから飛ばした特殊ファイルの、アーカイブの中でのパス（store/…）。
+	Skipped []string
+}
+
+func writeReadme(tw *tar.Writer, top string, data readmeData, now time.Time) error {
 	var buf bytes.Buffer
-	if err := readmeTemplate.Execute(&buf, struct {
-		CreatedAt string
-		Version   string
-	}{
-		CreatedAt: now.Format("2006-01-02 15:04:05 -0700"),
-		Version:   opts.Version,
-	}); err != nil {
+	if err := readmeTemplate.Execute(&buf, data); err != nil {
 		return err
 	}
 	if err := tw.WriteHeader(&tar.Header{
@@ -157,24 +170,29 @@ func writeReadme(tw *tar.Writer, top string, now time.Time, opts Options) error 
 	return err
 }
 
-// writeStore はストアのディレクトリと通常ファイルを prefix/ の下に書く。
-// パーミッションは tar のヘッダーに保つ。
-func writeStore(ctx context.Context, tw *tar.Writer, prefix, storeDir string) error {
-	return filepath.WalkDir(storeDir, func(p string, d fs.DirEntry, err error) error {
+// writeStore はストアを丸ごと top/dir/ の下に書く。パーミッションは tar のヘッダーに保つ。
+// シンボリックリンクはリンク先をたどらずにリンクのまま入れる。通常ファイル・ディレクトリ・
+// シンボリックリンクのどれでもないもの（ソケットなど）は飛ばし、その dir/… の形のパスを返す。
+func writeStore(ctx context.Context, tw *tar.Writer, top, dir, storeDir string) ([]string, error) {
+	// ストアのディレクトリそのものがシンボリックリンクでも、その先を写す。
+	root, err := filepath.EvalSymlinks(storeDir)
+	if err != nil {
+		return nil, err
+	}
+	var skipped []string
+	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		rel, err := filepath.Rel(storeDir, p)
+		rel, err := filepath.Rel(root, p)
 		if err != nil {
 			return err
 		}
-		name := prefix
-		if rel != "." {
-			name = path.Join(prefix, filepath.ToSlash(rel))
-		}
+		inner := path.Join(dir, filepath.ToSlash(rel))
+		name := path.Join(top, inner)
 		info, err := d.Info()
 		if err != nil {
 			return err
@@ -184,9 +202,26 @@ func writeStore(ctx context.Context, tw *tar.Writer, prefix, storeDir string) er
 			return writeHeader(tw, info, name+"/")
 		case info.Mode().IsRegular():
 			return writeFile(tw, info, name, p)
+		case info.Mode()&fs.ModeSymlink != 0:
+			// リンク先はたどらず、リンクのまま入れる。
+			target, err := os.Readlink(p)
+			if err != nil {
+				return err
+			}
+			h, err := tar.FileInfoHeader(info, target)
+			if err != nil {
+				return err
+			}
+			h.Name = name
+			return tw.WriteHeader(h)
 		}
+		skipped = append(skipped, inner)
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return skipped, nil
 }
 
 func writeHeader(tw *tar.Writer, info fs.FileInfo, name string) error {

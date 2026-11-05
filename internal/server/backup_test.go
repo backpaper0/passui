@@ -78,6 +78,19 @@ func TestBackupShowsFullPathInRightPane(t *testing.T) {
 	}
 }
 
+func TestBackupLogsHowManySpecialFilesWereSkipped(t *testing.T) {
+	h := passuitest.New(t)
+	fake := &fakeBackup{sum: backup.Summary{Path: backupPath, SkippedSpecialFiles: 3}}
+	srv := h.Serve(passuitest.Options{Backup: fake.Backup})
+
+	if res, body := postBackup(t, srv, true); res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200:\n%s", res.StatusCode, body)
+	}
+	if logs := h.Logs(); !strings.Contains(logs, "skipped_special_files=3") {
+		t.Errorf("operation log lacks the number of skipped special files:\n%s", logs)
+	}
+}
+
 func TestBackupWithoutHtmxShowsFullPageWithLinkToTop(t *testing.T) {
 	h := passuitest.New(t)
 	fake := &fakeBackup{sum: backup.Summary{Path: backupPath}}

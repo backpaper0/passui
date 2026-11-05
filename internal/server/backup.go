@@ -38,6 +38,6 @@ func (s *handler) runBackup(r *http.Request) (int, backupData) {
 		id := logFailure(r.Context(), s.logger, "backup", "dir", s.cfg.BackupDir, "err", err)
 		return http.StatusInternalServerError, backupData{Failure: failureMessage(id)}
 	}
-	s.logOperation(r, "backup", "", "path", sum.Path)
+	s.logOperation(r, "backup", "", "path", sum.Path, "skipped_special_files", sum.SkippedSpecialFiles)
 	return http.StatusOK, backupData{Path: sum.Path}
 }
