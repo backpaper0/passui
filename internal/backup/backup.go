@@ -70,7 +70,10 @@ var mu sync.Mutex
 //go:embed README.txt.tmpl
 var readmeText string
 
-var readmeTemplate = template.Must(template.New("README.txt").Parse(readmeText))
+// readmeTemplate は README.txt のテンプレート。復元の手順は "restore-steps" という名前で
+// 同じ集まりに入れ、README.txt から呼ぶ。
+var readmeTemplate = template.Must(template.Must(
+	template.New("README.txt").Parse(readmeText)).New("restore-steps").Parse(restoreStepsText))
 
 // Write はその時点のストアを 1 つの tar.gz にまとめ、バックアップ先に
 // passui-backup-YYYYMMDD-HHMMSS.tar.gz（0600）として置く。
@@ -220,6 +223,7 @@ func writeArchive(ctx context.Context, w io.Writer, top string, now time.Time, o
 	}
 	// 飛ばしたものを書くので、README.txt はストアの後に書く。
 	if err := writeReadme(tw, top, readmeData{
+		Name:      top,
 		CreatedAt: now.Format("2006-01-02 15:04:05 -0700"),
 		Version:   opts.Version,
 		Keys:      keys,
@@ -258,12 +262,19 @@ func writeSecretKeys(tw *tar.Writer, dir string, keys []storeKey, now time.Time)
 
 // readmeData は README.txt のテンプレートに渡す。
 type readmeData struct {
+	// Name はバックアップの名前（.tar.gz を除いたファイル名）。
+	Name      string
 	CreatedAt string
 	Version   string
 	// Keys はストアの鍵。
 	Keys []storeKey
 	// Skipped はストアから飛ばした特殊ファイルの、アーカイブの中でのパス（store/…）。
 	Skipped []string
+}
+
+// Steps は、このバックアップ向けの復元の手順に渡す値。
+func (d readmeData) Steps() restoreSteps {
+	return restoreSteps{Name: d.Name, Keys: d.Keys}
 }
 
 // MissingSecrets は、ゲストに秘密鍵のないストアの鍵があるか。
@@ -273,7 +284,7 @@ func (d readmeData) MissingSecrets() bool {
 
 func writeReadme(tw *tar.Writer, top string, data readmeData, now time.Time) error {
 	var buf bytes.Buffer
-	if err := readmeTemplate.Execute(&buf, data); err != nil {
+	if err := readmeTemplate.ExecuteTemplate(&buf, "README.txt", data); err != nil {
 		return err
 	}
 	return writeBytes(tw, path.Join(top, "README.txt"), buf.Bytes(), now)

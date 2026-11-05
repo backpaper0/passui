@@ -110,6 +110,79 @@ printf 'PASSUI_PORT=3561\nPASSUI_LOG_LEVEL=debug\n' > ~/.config/passui/env
 systemctl --user restart passui
 ```
 
+## バックアップと復元
+
+画面のバックアップ ボタンを押すと、その時点のストアとストアの鍵を 1 つのファイルにまとめて、バックアップ先に置きます。ロック中でも作れます。ストアにも gpg-agent にも書き込みません。
+
+- 置き場所: 既定は `${XDG_DATA_HOME:-~/.local/share}/passui/backup` です（なければ `0700` で作ります）。`PASSUI_BACKUP_DIR` で変えられます（[設定](#設定)）。
+- ファイル: `passui-backup-YYYYMMDD-HHMMSS.tar.gz`（`0600`）。同じ名前のファイルがあれば、上書きせずに失敗します。
+- 中身:
+  - `store/`: ストアを丸ごと写したもの（`.git` や `.gpg-id` を含む）。ソケットなどの特殊なファイルは飛ばします。
+  - `gnupg/public-keys.asc`: ストアの鍵の公開鍵。
+  - `gnupg/ownertrust.txt`: ストアの鍵の ownertrust（ストアの鍵の行だけ）。
+  - `gnupg/private-keys-v1.d/<keygrip>.key`: ストアの鍵のうち、ゲストに秘密部分がある主鍵・副鍵の gpg-agent の鍵ファイル。
+  - `README.txt`: 作成日時、passui のバージョン、ストアの鍵の一覧（指紋、秘密鍵の有無、keygrip）、飛ばしたファイル、そのバックアップ向けの復元の手順。
+- 秘密鍵は、元のパスフレーズで保護されたまま入っています。復元にはそのパスフレーズが要ります。言い換えると、守っているのはパスフレーズだけです。クラウドなどゲストの外に置くときは、置き場所の共有範囲やアクセス権に注意してください。
+- バックアップ先からクラウドストレージなどへ上げるかどうか、どう上げるかは、passui の外で好きに決めてください（passui は上げません）。
+- ゲストに秘密鍵のないストアの鍵は、公開鍵だけが入ります。その鍵だけで暗号化したエントリは、このバックアップから戻しても復号できません。その鍵の秘密鍵は、別に持っている場所から取り込んでください（`README.txt` では、その鍵が「秘密鍵: なし」になります）。
+
+### 復元
+
+passui に復元の機能はありません。新しいゲストで、次の手順を手で実行します。各バックアップの `README.txt` にも、そのバックアップの名前、指紋、keygrip を埋めた同じ手順が書かれています。
+
+<!-- backup-steps:begin -->
+復元の手順
+
+ストアもストアの鍵もない、新しいゲストに戻すことを前提にしています。ゲストに pass と
+gnupg を入れ、元のパスフレーズを用意してから、バックアップのファイルがあるディレクトリで
+次のとおりに実行してください。
+
+1. ストアがまだないことを確かめます。ストアがあれば、ここで止めてください（上書きしません）。
+
+       test ! -e "${PASSWORD_STORE_DIR:-$HOME/.password-store}"
+
+2. バックアップを展開し、その中に移ります。
+
+       tar -xzf passui-backup-<日時>.tar.gz
+       cd passui-backup-<日時>
+
+3. ストアの鍵の公開鍵を取り込みます。
+
+       gpg --batch --import gnupg/public-keys.asc
+
+4. 秘密鍵（.key）を gpg-agent の鍵ファイルの場所に写し、gpg-agent に読み直させます。
+
+       dir="$(gpgconf --list-dirs homedir)/private-keys-v1.d"
+       install -d -m 700 "$dir"
+       install -m 600 gnupg/private-keys-v1.d/<keygrip>.key "$dir"
+       gpgconf --kill gpg-agent
+
+5. ストアの鍵の ownertrust を取り込みます。
+
+       gpg --batch --import-ownertrust gnupg/ownertrust.txt
+
+6. ストアを置きます。
+
+       cp -a store "${PASSWORD_STORE_DIR:-$HOME/.password-store}"
+
+7. ストアに書き込まずに確かめます。秘密鍵が一覧に出ること、警告なしに暗号化できること
+   （ownertrust が効いていること）、元のパスフレーズでエントリを復号できること、最後の
+   コミットがバックアップした時点のものであること（ストアを git で管理しているときだけ）。
+   エントリの印は、ストアにあるエントリの名前に置き換えてください。
+
+       gpg --list-secret-keys <指紋>
+       echo test | gpg --batch -e -r <指紋> >/dev/null
+       pass show <エントリ>
+       git -C "${PASSWORD_STORE_DIR:-$HOME/.password-store}" log -1
+
+8. 後片付けとして、展開したディレクトリを消します（秘密鍵が入っています）。
+
+       cd ..
+       rm -rf passui-backup-<日時>
+<!-- backup-steps:end -->
+
+鍵の数だけ、`install` の行（keygrip ごと）と、`gpg --list-secret-keys`・`gpg -e` の行（秘密鍵のある鍵ごと）が並びます。秘密鍵が 1 つもないバックアップでは、4 の手順は飛ばします。
+
 ## ログ
 
 ```sh

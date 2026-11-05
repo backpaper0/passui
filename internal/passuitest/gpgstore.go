@@ -53,7 +53,7 @@ func NewGPGStore(h *Harness) *GPGStore {
 	}
 
 	// gpg-agent のソケットのパスが長すぎないように、短い一時ディレクトリを使う。
-	root, err := os.MkdirTemp(shortTempDir(), "passui-it-")
+	root, err := os.MkdirTemp(ShortTempDir(), "passui-it-")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
 	}
@@ -134,6 +134,12 @@ func (g *GPGStore) Show(name string) string {
 	return string(out)
 }
 
+// Passphrase は鍵（KeyID）のパスフレーズを返す（カナリア）。バックアップから別の
+// GNUPGHOME に戻した鍵を、元のパスフレーズで使えるか確かめるために使う。
+func (g *GPGStore) Passphrase() string {
+	return g.passphrase
+}
+
 // Lock は `gpgconf --reload gpg-agent` で gpg-agent のキャッシュを消し、ロック状態にする。
 func (g *GPGStore) Lock() {
 	g.h.t.Helper()
@@ -163,7 +169,7 @@ func (g *GPGStore) AddKey(label string) string {
 func (g *GPGStore) AddPublicKey(label string) string {
 	g.h.t.Helper()
 	t := g.h.t
-	home, err := os.MkdirTemp(shortTempDir(), "passui-pub-")
+	home, err := os.MkdirTemp(ShortTempDir(), "passui-pub-")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
 	}
@@ -234,9 +240,9 @@ func (g *GPGStore) must(stdin string, name string, args ...string) {
 	}
 }
 
-// shortTempDir は一時ディレクトリの置き場所を返す。TMPDIR が長いと gpg-agent の
-// ソケットのパスが UNIX ソケットの上限を超えるので、そのときは /tmp を使う。
-func shortTempDir() string {
+// ShortTempDir は、GNUPGHOME にする一時ディレクトリの置き場所を返す。TMPDIR が長いと
+// gpg-agent のソケットのパスが UNIX ソケットの上限を超えるので、そのときは /tmp を使う。
+func ShortTempDir() string {
 	dir := os.TempDir()
 	if len(dir) > 40 {
 		if fi, err := os.Stat("/tmp"); err == nil && fi.IsDir() {
