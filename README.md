@@ -204,3 +204,7 @@ go test -race ./...
 - 統合テストは実際の `pass` と `gpg` を使います。見つからなければスキップします（`PASSUI_REQUIRE_INTEGRATION=1` ならスキップせず失敗にします。CI はこちら）。
 - リリース: `v1.2.3` の形のタグを push すると、`.github/workflows/release.yml` が goreleaser で Linux（amd64 / arm64）の tar.gz と `checksums.txt` を GitHub Releases に出します。
 - リリース前の手動確認は [docs/manual-checklist.md](docs/manual-checklist.md) にあります。
+
+## ライセンス
+
+[MIT License](LICENSE)
