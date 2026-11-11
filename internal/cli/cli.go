@@ -131,6 +131,11 @@ func serve(ctx context.Context, env environ, stderr io.Writer) int {
 		})
 	}
 
+	importFile := func(ctx context.Context, r io.Reader) (export.ImportSummary, error) {
+		return export.Import(ctx, r, export.ImportOptions{StoreDir: storeCfg.Dir, Env: storeCfg.Env})
+	}
+	storeEmpty := func(context.Context) (bool, error) { return export.StoreEmpty(storeCfg.Dir) }
+
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port))
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -156,10 +161,12 @@ func serve(ctx context.Context, env environ, stderr io.Writer) int {
 
 	srv := &http.Server{
 		Handler: server.New(server.Config{
-			Port:   cfg.Port,
-			Token:  token,
-			Store:  backend,
-			Export: writeExport,
+			Port:       cfg.Port,
+			Token:      token,
+			Store:      backend,
+			Export:     writeExport,
+			Import:     importFile,
+			StoreEmpty: storeEmpty,
 		}, logger),
 		ReadHeaderTimeout: 10 * time.Second,
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelWarn),

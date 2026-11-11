@@ -1,6 +1,9 @@
-// Package export はエクスポートファイル（ストアとストアの鍵をまとめた 1 つの tar.gz）を作る。
-// 入口は Write だけ。作ったものは呼び出し側の io.Writer に書くだけで、ゲストには何も
-// 残さない。ストアにも gpg-agent にも書き込まない。
+// Package export はエクスポートファイル（ストアとストアの鍵をまとめた 1 つの tar.gz）を
+// 作り（Write）、空のゲストに戻す（Import）。
+//
+// Write は作ったものを呼び出し側の io.Writer に書くだけで、ゲストには何も残さない。
+// ストアにも gpg-agent にも書き込まない。ストアと gpg-agent の鍵ファイルの場所に
+// 書き込むのは Import だけで、空のゲストのときに限る（import.go）。
 package export
 
 import (

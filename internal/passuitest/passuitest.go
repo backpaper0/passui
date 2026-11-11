@@ -111,6 +111,14 @@ type Options struct {
 	// Export はエクスポートファイルを作る関数（server.Config.Export）。nil なら、何も
 	// 書かずに FakeExportName を返す偽物を使う。
 	Export server.ExportFunc
+	// Import はエクスポートファイルから戻す関数（server.Config.Import）。nil なら、読み捨てて
+	// 成功を返す偽物を使う。
+	Import server.ImportFunc
+	// StoreEmpty はストアのディレクトリがないか空かを返す関数（server.Config.StoreEmpty）。
+	// nil なら false を返す（インポートの入口を出さない）。
+	StoreEmpty server.StoreEmptyFunc
+	// ImportLimit はインポートのリクエストの大きさの上限（server.Config.ImportLimit）。
+	ImportLimit int64
 }
 
 // FakeExportName は Options.Export を省いたときの偽物が返すファイル名。
@@ -134,11 +142,23 @@ func (h *Harness) Serve(opts Options) *Server {
 			return export.Summary{Name: FakeExportName}, nil
 		}
 	}
+	if opts.Import == nil {
+		opts.Import = func(_ context.Context, r io.Reader) (export.ImportSummary, error) {
+			_, err := io.Copy(io.Discard, r)
+			return export.ImportSummary{}, err
+		}
+	}
+	if opts.StoreEmpty == nil {
+		opts.StoreEmpty = func(context.Context) (bool, error) { return false, nil }
+	}
 	cfg := server.Config{
-		Port:   opts.Port,
-		Token:  secret.Of(opts.Token),
-		Store:  opts.Store,
-		Export: opts.Export,
+		Port:        opts.Port,
+		Token:       secret.Of(opts.Token),
+		Store:       opts.Store,
+		Export:      opts.Export,
+		Import:      opts.Import,
+		StoreEmpty:  opts.StoreEmpty,
+		ImportLimit: opts.ImportLimit,
 	}
 	s := h.newServer(opts.Port, server.New(cfg, h.Logger))
 	s.Token = opts.Token
