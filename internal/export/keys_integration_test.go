@@ -1,4 +1,4 @@
-package backup_test
+package export_test
 
 import (
 	"errors"
@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/backpaper0/passui/internal/backup"
+	"github.com/backpaper0/passui/internal/export"
 	"github.com/backpaper0/passui/internal/passuitest"
 )
 
-const keysTop = "passui-backup-20261105-090807/"
+const keysTop = "passui-export-20261105-090807/"
 
 // importedFingerprints は、armor の公開鍵 asc を取り込まずに読み、主鍵の指紋を返す。
 func importedFingerprints(t *testing.T, g *passuitest.GPGStore, asc string) []string {
@@ -50,8 +50,8 @@ func TestIntegrationWritePutsPublicKeysOfAllStoreKeys(t *testing.T) {
 	fromEnv := g.AddPublicKey("env")
 	unrelated := g.AddKey("unrelated")
 
-	sum, err := backup.Write(t.Context(), backup.Options{
-		StoreDir: g.Dir, Dir: t.TempDir(), Now: at, Version: "dev",
+	sum, err := writeExport(t, t.Context(), t.TempDir(), export.Options{
+		StoreDir: g.Dir, Now: at, Version: "dev",
 		Env: append(g.Env(), "PASSWORD_STORE_KEY="+fromEnv),
 	})
 	if err != nil {
@@ -96,8 +96,8 @@ func TestIntegrationWritePutsOwnertrustOfStoreKeysOnly(t *testing.T) {
 	noTrust := g.AddPublicKey("notrust")
 	g.Run("", "pass", "init", "-p", "team", noTrust)
 
-	sum, err := backup.Write(t.Context(), backup.Options{
-		StoreDir: g.Dir, Dir: t.TempDir(), Now: at, Version: "dev", Env: g.Env(),
+	sum, err := writeExport(t, t.Context(), t.TempDir(), export.Options{
+		StoreDir: g.Dir, Now: at, Version: "dev", Env: g.Env(),
 	})
 	if err != nil {
 		t.Fatalf("Write: %v", err)
@@ -113,7 +113,7 @@ func TestIntegrationWritePutsOwnertrustOfStoreKeysOnly(t *testing.T) {
 	}
 }
 
-// ストアの鍵に ownertrust が 1 つもなくても、バックアップは成功する。
+// ストアの鍵に ownertrust が 1 つもなくても、エクスポートは成功する。
 func TestIntegrationWriteSucceedsWithoutOwnertrust(t *testing.T) {
 	h := passuitest.New(t)
 	g := passuitest.NewGPGStore(h)
@@ -122,8 +122,8 @@ func TestIntegrationWriteSucceedsWithoutOwnertrust(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sum, err := backup.Write(t.Context(), backup.Options{
-		StoreDir: g.Dir, Dir: t.TempDir(), Now: at, Version: "dev", Env: g.Env(),
+	sum, err := writeExport(t, t.Context(), t.TempDir(), export.Options{
+		StoreDir: g.Dir, Now: at, Version: "dev", Env: g.Env(),
 	})
 	if err != nil {
 		t.Fatalf("Write: %v", err)
@@ -140,7 +140,7 @@ func TestIntegrationWriteSucceedsWithoutOwnertrust(t *testing.T) {
 }
 
 // 解決できない ID が 1 つでもあれば *UnresolvedKeysError（その ID の一覧付き）で、
-// バックアップ先には何も残らない。
+// 何も返さない。
 func TestIntegrationWriteFailsWithUnresolvedKeys(t *testing.T) {
 	h := passuitest.New(t)
 	g := passuitest.NewGPGStore(h)
@@ -152,21 +152,16 @@ func TestIntegrationWriteFailsWithUnresolvedKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	const missingEnv = "0123456789ABCDEF0123456789ABCDEF01234567"
-	dest := t.TempDir()
-
-	_, err := backup.Write(t.Context(), backup.Options{
-		StoreDir: g.Dir, Dir: dest, Now: at, Version: "dev",
+	_, err := writeExport(t, t.Context(), t.TempDir(), export.Options{
+		StoreDir: g.Dir, Now: at, Version: "dev",
 		Env: append(g.Env(), "PASSWORD_STORE_KEY="+missingEnv),
 	})
 
-	var unresolved *backup.UnresolvedKeysError
+	var unresolved *export.UnresolvedKeysError
 	if !errors.As(err, &unresolved) {
 		t.Fatalf("err = %v, want *UnresolvedKeysError", err)
 	}
 	if want := []string{"nobody@example.invalid", missingEnv}; !slices.Equal(sortedCopy(unresolved.IDs), sortedCopy(want)) {
 		t.Errorf("IDs = %v, want %v", unresolved.IDs, want)
-	}
-	if names := listDir(t, dest); len(names) != 0 {
-		t.Errorf("destination has %v, want nothing", names)
 	}
 }

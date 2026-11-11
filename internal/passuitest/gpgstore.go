@@ -134,7 +134,7 @@ func (g *GPGStore) Show(name string) string {
 	return string(out)
 }
 
-// Passphrase は鍵（KeyID）のパスフレーズを返す（カナリア）。バックアップから別の
+// Passphrase は鍵（KeyID）のパスフレーズを返す（カナリア）。エクスポートファイルから別の
 // GNUPGHOME に戻した鍵を、元のパスフレーズで使えるか確かめるために使う。
 func (g *GPGStore) Passphrase() string {
 	return g.passphrase

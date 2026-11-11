@@ -1,0 +1,4 @@
+{{define "export-button"}}<!-- エクスポートは確認なしですぐ作る。ロック中でも同じ。htmx を使わない普通のフォームの POST なので、
+     成功したときは画面が変わらず、ダウンロードだけが始まる。失敗したときは結果のページに移る。 -->
+<form class="export-form" method="post" action="/export"><button type="submit">エクスポート</button></form>
+{{end}}

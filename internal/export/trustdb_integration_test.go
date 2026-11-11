@@ -1,4 +1,4 @@
-package backup_test
+package export_test
 
 import (
 	"bytes"
@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/backpaper0/passui/internal/backup"
+	"github.com/backpaper0/passui/internal/export"
 	"github.com/backpaper0/passui/internal/passuitest"
 )
 
-// バックアップは取るだけで、gpg の状態を変えない。ownertrust を変えた直後で trustdb の
+// エクスポートは取るだけで、gpg の状態を変えない。ownertrust を変えた直後で trustdb の
 // 検査が待っていても、trustdb.gpg を書き換えない。
 func TestIntegrationWriteDoesNotUpdateTrustdb(t *testing.T) {
 	h := passuitest.New(t)
@@ -24,8 +24,8 @@ func TestIntegrationWriteDoesNotUpdateTrustdb(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := backup.Write(t.Context(), backup.Options{
-		StoreDir: g.Dir, Dir: t.TempDir(), Now: at, Version: "dev",
+	if _, err := writeExport(t, t.Context(), t.TempDir(), export.Options{
+		StoreDir: g.Dir, Now: at, Version: "dev",
 		Env: append(g.Env(), "PASSWORD_STORE_KEY="+other),
 	}); err != nil {
 		t.Fatalf("Write: %v", err)
@@ -36,6 +36,6 @@ func TestIntegrationWriteDoesNotUpdateTrustdb(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(before, after) {
-		t.Error("backup updated trustdb.gpg")
+		t.Error("export updated trustdb.gpg")
 	}
 }

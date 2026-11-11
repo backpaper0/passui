@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/backpaper0/passui/internal/backup"
+	"github.com/backpaper0/passui/internal/export"
 	"github.com/backpaper0/passui/internal/secret"
 	"github.com/backpaper0/passui/internal/server"
 	"github.com/backpaper0/passui/internal/store"
@@ -39,8 +39,6 @@ const help = `passui - password-store をブラウザから管理する Web ツ�
 設定（環境変数）:
   PASSUI_PORT       待ち受けるポート（既定: 3560）
   PASSUI_LOG_LEVEL  info または debug（既定: info）
-  PASSUI_BACKUP_DIR バックアップ先。絶対パス
-                    （既定: ${XDG_DATA_HOME:-~/.local/share}/passui/backup）
   サービスでは ~/.config/passui/env に KEY=VALUE で書く。
 `
 
@@ -124,28 +122,12 @@ func serve(ctx context.Context, env environ, stderr io.Writer) int {
 	logger.Info("store", "dir", storeCfg.Dir, "gnupghome", storeCfg.GnupgHome)
 	backend := store.NewPass(storeCfg, logger)
 
-	// バックアップ先を決められなくても起動は止めない（バックアップを押したときに失敗する）。
-	// 決められないのは、PASSUI_BACKUP_DIR も絶対パスの XDG_DATA_HOME もなく HOME が空の
-	// ときだけで、HOME が空でも PASSWORD_STORE_DIR と GNUPGHOME があればストアは使える。
-	// そのときバックアップは 500（エラー ID 付き）になり、ログの err に理由が出る。
-	// 起動時にバックアップ先を確かめないのと同じく、バックアップのために起動を止めない。
-	backupDir, createBackupDir, backupDirErr := backupDir(env)
-	if backupDirErr != nil {
-		logger.Warn("cannot locate the backup directory", "err", backupDirErr)
-	} else {
-		logger.Info("backup", "dir", backupDir, "create", createBackupDir)
-	}
-	writeBackup := func(ctx context.Context) (backup.Summary, error) {
-		if backupDirErr != nil {
-			return backup.Summary{}, backupDirErr
-		}
-		return backup.Write(ctx, backup.Options{
-			StoreDir:  storeCfg.Dir,
-			Dir:       backupDir,
-			CreateDir: createBackupDir,
-			Now:       time.Now(),
-			Version:   Version,
-			Env:       storeCfg.Env,
+	writeExport := func(ctx context.Context, w io.Writer) (export.Summary, error) {
+		return export.Write(ctx, w, export.Options{
+			StoreDir: storeCfg.Dir,
+			Now:      time.Now(),
+			Version:  Version,
+			Env:      storeCfg.Env,
 		})
 	}
 
@@ -174,11 +156,10 @@ func serve(ctx context.Context, env environ, stderr io.Writer) int {
 
 	srv := &http.Server{
 		Handler: server.New(server.Config{
-			Port:      cfg.Port,
-			Token:     token,
-			Store:     backend,
-			BackupDir: backupDir,
-			Backup:    writeBackup,
+			Port:   cfg.Port,
+			Token:  token,
+			Store:  backend,
+			Export: writeExport,
 		}, logger),
 		ReadHeaderTimeout: 10 * time.Second,
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelWarn),

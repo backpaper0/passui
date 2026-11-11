@@ -1,12 +1,12 @@
-package backup_test
+package export_test
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"errors"
 	"io"
-	"io/fs"
 	"net"
 	"os"
 	"os/exec"
@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/backpaper0/passui/internal/backup"
+	"github.com/backpaper0/passui/internal/export"
 )
 
 // at はテストで与える作成日時（ゲストのローカル時刻）。
@@ -73,13 +73,27 @@ func readArchive(t *testing.T, path string) map[string]entry {
 	}
 }
 
-// errorPath は Write のエラーが指すパス（*fs.PathError の Path）を返す。
-func errorPath(err error) string {
-	var pe *fs.PathError
-	if errors.As(err, &pe) {
-		return pe.Path
+// exported は writeExport の結果。
+type exported struct {
+	export.Summary
+	// Path は、Write が書いたものを置いたファイル（dir/Summary.Name）。
+	Path string
+}
+
+// writeExport は Write でエクスポートファイルを作り、ブラウザがダウンロードして保存するのと
+// 同じく、dir に Summary.Name の名前で置く。失敗したら何も置かない。
+func writeExport(t *testing.T, ctx context.Context, dir string, opts export.Options) (exported, error) {
+	t.Helper()
+	var buf bytes.Buffer
+	sum, err := export.Write(ctx, &buf, opts)
+	if err != nil {
+		return exported{Summary: sum}, err
 	}
-	return ""
+	p := filepath.Join(dir, sum.Name)
+	if err := os.WriteFile(p, buf.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return exported{Summary: sum, Path: p}, nil
 }
 
 func listDir(t *testing.T, dir string) []string {
@@ -103,11 +117,9 @@ func TestWritePutsStoreAndReadmeIntoArchiveNamedByTime(t *testing.T) {
 		".git/HEAD":         "ref: refs/heads/main\n",
 		"notes/readme.text": "plain",
 	})
-	dest := t.TempDir()
 
-	sum, err := backup.Write(t.Context(), backup.Options{
+	sum, err := writeExport(t, t.Context(), t.TempDir(), export.Options{
 		StoreDir: storeDir,
-		Dir:      dest,
 		Now:      at,
 		Version:  "1.2.3",
 	})
@@ -115,23 +127,12 @@ func TestWritePutsStoreAndReadmeIntoArchiveNamedByTime(t *testing.T) {
 		t.Fatalf("Write: %v", err)
 	}
 
-	want := filepath.Join(dest, "passui-backup-20261105-090807.tar.gz")
-	if sum.Path != want {
-		t.Errorf("Path = %q, want %q", sum.Path, want)
-	}
-	fi, err := os.Stat(want)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if fi.Mode().Perm() != 0o600 {
-		t.Errorf("archive mode = %v, want 0600", fi.Mode().Perm())
-	}
-	if names := listDir(t, dest); len(names) != 1 {
-		t.Errorf("destination has %v, want only the archive", names)
+	if want := "passui-export-20261105-090807.tar.gz"; sum.Name != want {
+		t.Errorf("Name = %q, want %q", sum.Name, want)
 	}
 
-	got := readArchive(t, want)
-	const top = "passui-backup-20261105-090807/"
+	got := readArchive(t, sum.Path)
+	const top = "passui-export-20261105-090807/"
 	for name, body := range map[string]string{
 		"store/.extensions/x":     "echo x\n",
 		"store/bank.gpg":          "ciphertext-bank",
@@ -181,116 +182,32 @@ func keys(m map[string]entry) []string {
 	return ks
 }
 
-func TestWriteCreatesMissingDestinationWith0700WhenAsked(t *testing.T) {
+// Write は w に書くだけで、ゲストには何も残さない（一時ファイルも作らない）。
+func TestWriteLeavesNothingOnGuest(t *testing.T) {
 	storeDir := newStore(t, map[string]string{"bank.gpg": "x"})
-	dest := filepath.Join(t.TempDir(), "share", "passui", "backup")
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	t.Chdir(t.TempDir())
 
-	sum, err := backup.Write(t.Context(), backup.Options{StoreDir: storeDir, Dir: dest, CreateDir: true, Now: at})
-	if err != nil {
+	var buf bytes.Buffer
+	if _, err := export.Write(t.Context(), &buf, export.Options{StoreDir: storeDir, Now: at}); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 
-	for _, d := range []string{dest, filepath.Dir(dest)} {
-		fi, err := os.Stat(d)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if fi.Mode().Perm() != 0o700 {
-			t.Errorf("%s mode = %v, want 0700", d, fi.Mode().Perm())
+	if buf.Len() == 0 {
+		t.Error("Write wrote nothing to w")
+	}
+	for _, dir := range []string{tmp, "."} {
+		if names := listDir(t, dir); len(names) != 0 {
+			t.Errorf("%s has %v, want nothing", dir, names)
 		}
 	}
-	if _, err := os.Stat(sum.Path); err != nil {
-		t.Errorf("archive is not there: %v", err)
+	if names := listDir(t, storeDir); len(names) != 1 {
+		t.Errorf("store has %v, want only bank.gpg", names)
 	}
 }
 
-func TestWriteDoesNotCreateMissingDestinationUnlessAsked(t *testing.T) {
-	storeDir := newStore(t, map[string]string{"bank.gpg": "x"})
-	dest := filepath.Join(t.TempDir(), "missing")
-
-	_, err := backup.Write(t.Context(), backup.Options{StoreDir: storeDir, Dir: dest, Now: at})
-	if !errors.Is(err, backup.ErrNoDir) {
-		t.Fatalf("err = %v, want ErrNoDir", err)
-	}
-	if path := errorPath(err); path != dest {
-		t.Errorf("error path = %q, want %q", path, dest)
-	}
-	if _, err := os.Stat(dest); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("destination was created: %v", err)
-	}
-}
-
-func TestWriteReportsUnwritableDestination(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root can write without permission")
-	}
-	storeDir := newStore(t, map[string]string{"bank.gpg": "x"})
-	readOnly := t.TempDir()
-	if err := os.Chmod(readOnly, 0o500); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Chmod(readOnly, 0o700) })
-
-	for _, tc := range []struct {
-		name   string
-		dir    string
-		create bool
-	}{
-		{"existing read-only directory", readOnly, false},
-		{"existing read-only directory, create", readOnly, true},
-		{"cannot create under read-only parent", filepath.Join(readOnly, "backup"), true},
-	} {
-		_, err := backup.Write(t.Context(), backup.Options{StoreDir: storeDir, Dir: tc.dir, CreateDir: tc.create, Now: at})
-		if !errors.Is(err, backup.ErrNotWritable) {
-			t.Errorf("%s: err = %v, want ErrNotWritable", tc.name, err)
-		}
-		if path := errorPath(err); path != tc.dir {
-			t.Errorf("%s: error path = %q, want %q", tc.name, path, tc.dir)
-		}
-	}
-	if names := listDir(t, readOnly); len(names) != 0 {
-		t.Errorf("destination has %v, want nothing", names)
-	}
-}
-
-func TestWriteRejectsRelativeDestination(t *testing.T) {
-	storeDir := newStore(t, map[string]string{"bank.gpg": "x"})
-	t.Chdir(t.TempDir())
-
-	for _, dest := range []string{"", "backup"} {
-		if _, err := backup.Write(t.Context(), backup.Options{StoreDir: storeDir, Dir: dest, CreateDir: true, Now: at}); err == nil {
-			t.Errorf("Write(%q) succeeded, want an error", dest)
-		}
-	}
-	if names := listDir(t, "."); len(names) != 0 {
-		t.Errorf("working directory has %v, want nothing", names)
-	}
-}
-
-func TestWriteDoesNotOverwriteAnExistingBackup(t *testing.T) {
-	storeDir := newStore(t, map[string]string{"bank.gpg": "x"})
-	dest := t.TempDir()
-	existing := filepath.Join(dest, "passui-backup-20261105-090807.tar.gz")
-	if err := os.WriteFile(existing, []byte("older backup"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err := backup.Write(t.Context(), backup.Options{StoreDir: storeDir, Dir: dest, Now: at})
-	if !errors.Is(err, backup.ErrExists) {
-		t.Fatalf("err = %v, want ErrExists", err)
-	}
-	if path := errorPath(err); path != existing {
-		t.Errorf("error path = %q, want %q", path, existing)
-	}
-	if b, _ := os.ReadFile(existing); string(b) != "older backup" {
-		t.Errorf("existing backup was changed: %q", b)
-	}
-	if names := listDir(t, dest); len(names) != 1 {
-		t.Errorf("destination has %v, want only the existing backup", names)
-	}
-}
-
-func TestWriteLeavesNothingWhenItFailsHalfway(t *testing.T) {
+func TestWriteFailsWhenStoreFileIsUnreadable(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root can read files without permission")
 	}
@@ -298,27 +215,19 @@ func TestWriteLeavesNothingWhenItFailsHalfway(t *testing.T) {
 	if err := os.Chmod(filepath.Join(storeDir, "secret", "unreadable.gpg"), 0); err != nil {
 		t.Fatal(err)
 	}
-	dest := t.TempDir()
 
-	if _, err := backup.Write(t.Context(), backup.Options{StoreDir: storeDir, Dir: dest, Now: at}); err == nil {
+	if _, err := export.Write(t.Context(), io.Discard, export.Options{StoreDir: storeDir, Now: at}); err == nil {
 		t.Fatal("Write succeeded, want an error")
-	}
-	if names := listDir(t, dest); len(names) != 0 {
-		t.Errorf("destination has %v, want nothing (neither the archive nor .partial)", names)
 	}
 }
 
-func TestWriteLeavesNothingWhenCancelled(t *testing.T) {
+func TestWriteFailsWhenCancelled(t *testing.T) {
 	storeDir := newStore(t, map[string]string{"bank.gpg": "x"})
-	dest := t.TempDir()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	if _, err := backup.Write(ctx, backup.Options{StoreDir: storeDir, Dir: dest, Now: at}); !errors.Is(err, context.Canceled) {
+	if _, err := export.Write(ctx, io.Discard, export.Options{StoreDir: storeDir, Now: at}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
-	}
-	if names := listDir(t, dest); len(names) != 0 {
-		t.Errorf("destination has %v, want nothing", names)
 	}
 }
 
@@ -344,7 +253,7 @@ func TestWriteSkipsSocketsAndListsThemInReadme(t *testing.T) {
 	}
 	dest := t.TempDir()
 
-	sum, err := backup.Write(t.Context(), backup.Options{StoreDir: storeDir, Dir: dest, Now: at})
+	sum, err := writeExport(t, t.Context(), dest, export.Options{StoreDir: storeDir, Now: at})
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
@@ -353,7 +262,7 @@ func TestWriteSkipsSocketsAndListsThemInReadme(t *testing.T) {
 		t.Errorf("SkippedSpecialFiles = %d, want 2", sum.SkippedSpecialFiles)
 	}
 	got := readArchive(t, sum.Path)
-	const top = "passui-backup-20261105-090807/"
+	const top = "passui-export-20261105-090807/"
 	for _, name := range []string{"store/agent.sock", "store/run/other.sock"} {
 		if _, ok := got[top+name]; ok {
 			t.Errorf("archive has %s, want it skipped", name)
@@ -373,7 +282,7 @@ func TestWriteSkipsSocketsAndListsThemInReadme(t *testing.T) {
 func TestWriteSaysNothingWasSkippedWhenStoreHasNoSpecialFiles(t *testing.T) {
 	storeDir := newStore(t, map[string]string{"bank.gpg": "x"})
 
-	sum, err := backup.Write(t.Context(), backup.Options{StoreDir: storeDir, Dir: t.TempDir(), Now: at})
+	sum, err := writeExport(t, t.Context(), t.TempDir(), export.Options{StoreDir: storeDir, Now: at})
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
@@ -381,7 +290,7 @@ func TestWriteSaysNothingWasSkippedWhenStoreHasNoSpecialFiles(t *testing.T) {
 	if sum.SkippedSpecialFiles != 0 {
 		t.Errorf("SkippedSpecialFiles = %d, want 0", sum.SkippedSpecialFiles)
 	}
-	readme := readArchive(t, sum.Path)["passui-backup-20261105-090807/README.txt"].body
+	readme := readArchive(t, sum.Path)["passui-export-20261105-090807/README.txt"].body
 	if !strings.Contains(readme, "飛ばしたファイル: なし") {
 		t.Errorf("README.txt does not say nothing was skipped:\n%s", readme)
 	}
@@ -405,13 +314,13 @@ func TestWriteKeepsSymlinksAsLinksWithoutFollowingThem(t *testing.T) {
 	}
 	dest := t.TempDir()
 
-	sum, err := backup.Write(t.Context(), backup.Options{StoreDir: storeDir, Dir: dest, Now: at})
+	sum, err := writeExport(t, t.Context(), dest, export.Options{StoreDir: storeDir, Now: at})
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 
 	got := readArchive(t, sum.Path)
-	const top = "passui-backup-20261105-090807/"
+	const top = "passui-export-20261105-090807/"
 	for link, target := range links {
 		e, ok := got[top+"store/"+link]
 		if !ok {
@@ -453,7 +362,7 @@ func TestWriteKeepsPermissionsWhenExtractedWithTar(t *testing.T) {
 		}
 	}
 
-	sum, err := backup.Write(t.Context(), backup.Options{StoreDir: storeDir, Dir: t.TempDir(), Now: at})
+	sum, err := writeExport(t, t.Context(), t.TempDir(), export.Options{StoreDir: storeDir, Now: at})
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
@@ -464,7 +373,7 @@ func TestWriteKeepsPermissionsWhenExtractedWithTar(t *testing.T) {
 	if b, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("tar xzf: %v\n%s", err, b)
 	}
-	restored := filepath.Join(out, "passui-backup-20261105-090807", "store")
+	restored := filepath.Join(out, "passui-export-20261105-090807", "store")
 	for name, mode := range modes {
 		fi, err := os.Stat(filepath.Join(restored, filepath.FromSlash(name)))
 		if err != nil {
@@ -488,13 +397,13 @@ func TestWriteCopiesStoreThroughSymlinkedStoreDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sum, err := backup.Write(t.Context(), backup.Options{StoreDir: storeDir, Dir: t.TempDir(), Now: at})
+	sum, err := writeExport(t, t.Context(), t.TempDir(), export.Options{StoreDir: storeDir, Now: at})
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 
 	got := readArchive(t, sum.Path)
-	const top = "passui-backup-20261105-090807/"
+	const top = "passui-export-20261105-090807/"
 	if e := got[top+"store/"]; e.header == nil || e.header.Typeflag != tar.TypeDir {
 		t.Errorf("store/ is not a directory; has %v", keys(got))
 	}
