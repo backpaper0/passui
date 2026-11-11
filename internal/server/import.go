@@ -2,13 +2,15 @@ package server
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/backpaper0/passui/internal/export"
 )
 
 // defaultImportLimit は、インポートで受け付けるリクエストの大きさの既定の上限（バイト）。
-const defaultImportLimit = 512 << 20
+// README の「インポート」に書いたものと揃える。
+const defaultImportLimit = 64 << 20
 
 // importData は import_page.html（インポートの結果ページ）に渡す。
 type importData struct {
@@ -18,6 +20,8 @@ type importData struct {
 	Message string
 	// HasErrorID は、Message がエラー ID 付きの想定外の失敗か。途中まで戻したかもしれない。
 	HasErrorID bool
+	// Keygrips は、同じ keygrip の .key がゲストにすでにあって断ったときの、その keygrip。
+	Keygrips []string
 }
 
 // importFile は POST /import（左ペインのインポートのフォーム）。送られたエクスポートファイルから、
@@ -75,15 +79,21 @@ func (s *handler) importFile(w http.ResponseWriter, r *http.Request) {
 func (s *handler) importFailure(r *http.Request, err error) (int, importData) {
 	var tooLarge *http.MaxBytesError
 	var bad *export.InvalidExportFileError
+	var exists *export.SecretKeyExistsError
 	var status int
 	var msg string
+	var grips []string
 	switch {
 	case errors.As(err, &tooLarge):
-		status, msg = http.StatusRequestEntityTooLarge, "ファイルが大きすぎます。"
+		status, msg = http.StatusRequestEntityTooLarge, "ファイルが大きすぎます（上限は "+formatBytes(tooLarge.Limit)+"）。"
 	case errors.Is(err, export.ErrStoreNotEmpty):
 		status, msg = http.StatusConflict, "ストアが空ではないので、インポートしませんでした。インポートは、ストアがないか空のゲストにだけできます。"
 	case errors.Is(err, export.ErrSecretKeyExists):
 		status, msg = http.StatusConflict, "同じ秘密鍵がゲストにすでにあるので、インポートしませんでした。インポートは、ストアの鍵の秘密鍵がまだないゲストにだけできます。"
+		if errors.As(err, &exists) {
+			// keygrip は画面にだけ出す（err の文には入っていないので、ログには出ない）。
+			grips = exists.Keygrips
+		}
 	case errors.As(err, &bad):
 		status, msg = http.StatusBadRequest, "エクスポートファイルとして受け付けられません: "+bad.Reason
 	default:
@@ -91,5 +101,13 @@ func (s *handler) importFailure(r *http.Request, err error) (int, importData) {
 		return http.StatusInternalServerError, importData{Message: failureMessage(id), HasErrorID: true}
 	}
 	s.logger.WarnContext(r.Context(), "import failed", "op", "import", "err", err)
-	return status, importData{Message: msg}
+	return status, importData{Message: msg, Keygrips: grips}
+}
+
+// formatBytes は n バイトを、MiB で割り切れれば MiB で、そうでなければバイトで表す。
+func formatBytes(n int64) string {
+	if n >= 1<<20 && n%(1<<20) == 0 {
+		return fmt.Sprintf("%d MiB", n>>20)
+	}
+	return fmt.Sprintf("%d バイト", n)
 }

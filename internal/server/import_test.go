@@ -180,6 +180,28 @@ func TestImportFailuresAreClassified(t *testing.T) {
 	}
 }
 
+// 同じ keygrip の .key があって断ったときは、どの鍵か（keygrip）を画面に出す。ログには出さない。
+func TestImportShowsExistingSecretKeysOnlyOnScreen(t *testing.T) {
+	grips := []string{"0123456789ABCDEF0123456789ABCDEF01234567", "89ABCDEF0123456789ABCDEF0123456789ABCDEF"}
+	h := passuitest.New(t)
+	fake := &fakeImport{err: &export.SecretKeyExistsError{Keygrips: grips}}
+	srv := h.Serve(passuitest.Options{Import: fake.Import})
+
+	res, body := postImport(t, srv, "file", "tar.gz bytes")
+
+	if res.StatusCode != http.StatusConflict {
+		t.Errorf("status = %d, want 409:\n%s", res.StatusCode, body)
+	}
+	for _, grip := range grips {
+		if !strings.Contains(body, grip) {
+			t.Errorf("body lacks keygrip %s:\n%s", grip, body)
+		}
+		if strings.Contains(h.Logs(), grip) {
+			t.Errorf("logs have keygrip %s:\n%s", grip, h.Logs())
+		}
+	}
+}
+
 // ファイルのフィールドがない送信は、Import を呼ばずに 400 で断る。
 func TestImportWithoutFileIsBadRequest(t *testing.T) {
 	fake := &fakeImport{}
@@ -197,6 +219,34 @@ func TestImportWithoutFileIsBadRequest(t *testing.T) {
 	// 画面にエラー ID を出さないので、ログにもエラー ID を付けない。
 	if strings.Contains(body, "エラー ID") || strings.Contains(srv.Logs(), "error_id=") {
 		t.Errorf("an error ID is shown or logged:\n%s\n%s", body, srv.Logs())
+	}
+}
+
+// 既定では、64 MiB を超えるアップロードを 413 で断り、上限を画面に出す。64 MiB までは Import に渡す。
+func TestImportDefaultLimitIs64MiB(t *testing.T) {
+	const limit = 64 << 20
+	for _, tt := range []struct {
+		name   string
+		size   int
+		status int
+	}{
+		{"over", limit + 1, http.StatusRequestEntityTooLarge},
+		// multipart の境界やヘッダの分だけ余らせる。
+		{"under", limit - 4096, http.StatusOK},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := &fakeImport{}
+			srv := passuitest.New(t).Serve(passuitest.Options{Import: fake.Import})
+
+			res, body := postImport(t, srv, "file", strings.Repeat("x", tt.size))
+
+			if res.StatusCode != tt.status {
+				t.Fatalf("status = %d, want %d", res.StatusCode, tt.status)
+			}
+			if tt.status == http.StatusRequestEntityTooLarge && !strings.Contains(body, "上限は 64 MiB") {
+				t.Errorf("body lacks the limit:\n%s", body)
+			}
+		})
 	}
 }
 

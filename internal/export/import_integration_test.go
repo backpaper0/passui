@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -102,7 +103,8 @@ func TestIntegrationImportAcceptsOldBackupFile(t *testing.T) {
 	assertImported(t, ng, g.KeyID, secret)
 }
 
-// 同じ keygrip の .key がゲストにあれば、ErrSecretKeyExists で断り、ストアを置かない。
+// 同じ keygrip の .key がゲストにあれば、どの鍵かを *SecretKeyExistsError で返して断り、ストアを置かない。
+// エラー文（ログに出る）には keygrip を入れない。
 func TestIntegrationImportRefusesExistingSecretKey(t *testing.T) {
 	g, _, archive := exportForImport(t)
 
@@ -112,9 +114,115 @@ func TestIntegrationImportRefusesExistingSecretKey(t *testing.T) {
 	if !errors.Is(err, export.ErrSecretKeyExists) {
 		t.Fatalf("Import: %v, want ErrSecretKeyExists", err)
 	}
+	var exists *export.SecretKeyExistsError
+	if !errors.As(err, &exists) {
+		t.Fatalf("Import: %v, want *SecretKeyExistsError", err)
+	}
+	var want []string
+	for _, grip := range keygripsOf(t, g, g.KeyID) {
+		if fileExists(keyFile(g, grip)) {
+			want = append(want, grip)
+		}
+	}
+	slices.Sort(want)
+	if got := slices.Sorted(slices.Values(exists.Keygrips)); !slices.Equal(got, want) {
+		t.Errorf("Keygrips = %v, want %v", got, want)
+	}
+	for _, grip := range want {
+		if strings.Contains(err.Error(), grip) {
+			t.Errorf("error %q has a keygrip", err)
+		}
+	}
 	if fileExists(storeDir) {
 		t.Error("store was put though the import was refused")
 	}
+}
+
+// .key を置き、ストアを途中まで置いた後で失敗したら、置いた .key とストアを消す。取り込んだ公開鍵と
+// ownertrust は残す。
+func TestIntegrationImportRollsBackKeysAndStoreOnFailure(t *testing.T) {
+	g, _, archive := exportForImport(t)
+	ng := newGuest(t, g.Passphrase())
+	importTemp(t)
+	// ストアの最後（名前の順で後ろ）に深いファイルを足す。一時ディレクトリには展開できるが、
+	// パスの長いストアのディレクトリでは PATH_MAX を超えるので、ほかのファイルを置いた後で失敗する。
+	deep := "zz"
+	for range 18 {
+		deep += "/" + strings.Repeat("a", 200)
+	}
+	top := archiveTop(t, archive)
+	archive = appendEntries(t, archive, fileEntry(top+"/store/"+deep, "x", 0o600))
+	storeDir := filepath.Join(t.TempDir(), strings.Repeat("b", 250), strings.Repeat("c", 250), "store")
+
+	_, err := export.Import(t.Context(), bytes.NewReader(archive), export.ImportOptions{StoreDir: storeDir, Env: ng.env()})
+
+	if err == nil {
+		t.Fatal("Import succeeded, want an error")
+	}
+	if fileExists(storeDir) {
+		t.Error("store was left after the failed import")
+	}
+	keyDir := filepath.Join(ng.gnupgHome, "private-keys-v1.d")
+	if names, err := os.ReadDir(keyDir); err == nil && len(names) != 0 {
+		t.Errorf("%s has %d files after the failed import, want none", keyDir, len(names))
+	}
+	if out, _ := ng.run(t, "gpg --batch --list-keys "+g.KeyID); !strings.Contains(out, g.KeyID) {
+		t.Errorf("public key was not kept:\n%s", out)
+	}
+	if out, _ := ng.run(t, "gpg --export-ownertrust"); !strings.Contains(out, g.KeyID) {
+		t.Errorf("ownertrust was not kept:\n%s", out)
+	}
+}
+
+// archiveTop は tar.gz の最上位のディレクトリの名前を返す。
+func archiveTop(t *testing.T, archive []byte) string {
+	t.Helper()
+	gz, err := gzip.NewReader(bytes.NewReader(archive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := tar.NewReader(gz).Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	top, _, _ := strings.Cut(h.Name, "/")
+	return top
+}
+
+// appendEntries は tar.gz の最後に entries を足したものを返す。
+func appendEntries(t *testing.T, archive []byte, entries ...tarEntry) []byte {
+	t.Helper()
+	gz, err := gzip.NewReader(bytes.NewReader(archive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := tar.NewReader(gz)
+	var buf bytes.Buffer
+	ogz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(ogz)
+	for {
+		h, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := tw.WriteHeader(h); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.Copy(tw, tr); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeEntries(t, tw, entries)
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := ogz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
 }
 
 func fileExists(p string) bool {
