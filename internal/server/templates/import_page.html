@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>passui - インポート</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/passui.css">
+</head>
+<body class="standalone">
+<main class="standalone-card">
+<h1 class="brand">passui</h1>
+<h2>インポート</h2>
+{{if .Done}}<div class="import-result" role="status">
+<p>インポートしました。ターミナルで解錠し、エントリを開いて確かめてください。</p>
+<p>passui はパスフレーズを扱わないので、戻した鍵で復号できるかは確かめていません。</p>
+</div>
+{{else}}<div class="import-result" role="alert">
+<p class="error">{{.Message}}</p>
+{{if .HasErrorID}}<p>ログでエラー ID を探してください。</p>
+<p>途中で失敗したときは、置いた秘密鍵とストアを消しています。取り込んだ公開鍵と ownertrust は残っていることがあります。</p>
+{{else}}<p>ストアにも gpg-agent の鍵ファイルの場所にも、何も戻していません。</p>
+{{end}}
+</div>
+{{end}}<p><a href="/">トップに戻る</a></p>
+</main>
+</body>
+</html>

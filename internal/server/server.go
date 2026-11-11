@@ -40,11 +40,26 @@ type Config struct {
 	// Export はエクスポートファイルを作る（POST /export）。serve は export.Write を
 	// 包んだものを渡す。テストでは偽物に差し替える。New に渡すときは必須。
 	Export ExportFunc
+	// Import はエクスポートファイルからストアとストアの鍵を戻す（POST /import）。serve は
+	// export.Import を包んだものを渡す。New に渡すときは必須。
+	Import ImportFunc
+	// StoreEmpty は、ストアのディレクトリがないか空かを返す。true のときだけ、左ペインに
+	// インポートの入口を出す。New に渡すときは必須。
+	StoreEmpty StoreEmptyFunc
+	// ImportLimit は、インポートで受け付けるリクエストの大きさの上限（バイト）。0 なら
+	// defaultImportLimit。
+	ImportLimit int64
 }
 
 // ExportFunc はエクスポートファイルを w に書き、その要約を返す。失敗したときに w に
 // 書いたものは捨てられる。
 type ExportFunc func(ctx context.Context, w io.Writer) (export.Summary, error)
+
+// ImportFunc はエクスポートファイル r からストアとストアの鍵を戻し、その要約を返す。
+type ImportFunc func(ctx context.Context, r io.Reader) (export.ImportSummary, error)
+
+// StoreEmptyFunc は、ストアのディレクトリがないか空かを返す。
+type StoreEmptyFunc func(ctx context.Context) (bool, error)
 
 // New は passui の http.Handler を返す。すべてのルートに共通のミドルウェアが掛かり、
 // /login と /static/ 以外のルートにはログインが要る。
@@ -76,6 +91,7 @@ func (s *handler) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /lock-status", s.lockStatus)
 	mux.HandleFunc("POST /lock", s.lock)
 	mux.HandleFunc("POST /export", s.exportFile)
+	mux.HandleFunc("POST /import", s.importFile)
 	mux.HandleFunc("GET /new", s.newEntryForm)
 	mux.HandleFunc("POST /new", s.createEntry)
 	mux.HandleFunc("GET /edit/{name...}", s.editForm)

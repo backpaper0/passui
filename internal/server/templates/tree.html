@@ -7,6 +7,9 @@
 {{- end}}
 </ul>{{end -}}
 {{if .Failure}}<p class="error" role="alert">{{.Failure}}</p>
-{{else if .Empty}}<p class="placeholder">エントリがありません。</p>
+{{else if .Empty}}<div class="empty-store">
+<p class="placeholder">エントリがありません。</p>
+{{if .Importable}}{{template "import-form"}}{{end}}
+</div>
 {{else}}{{template "folder" .Root}}
 {{end}}

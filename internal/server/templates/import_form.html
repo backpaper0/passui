@@ -1,0 +1,8 @@
+{{define "import-form"}}<!-- ストアのディレクトリがないか空のときだけ出る。ファイルを送るので、htmx を使わない普通のフォームの POST
+     にする。結果は結果のページに出る。 -->
+<form class="import-form" method="post" action="/import" enctype="multipart/form-data">
+<p>エクスポートファイルがあれば、ストアとストアの鍵を戻せます。</p>
+<input type="file" name="file" accept=".tar.gz,.tgz,application/gzip" required aria-label="エクスポートファイル">
+<button type="submit">インポート</button>
+</form>
+{{end}}
