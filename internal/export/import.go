@@ -40,8 +40,31 @@ type ImportSummary struct {
 var ErrStoreNotEmpty = errors.New("store is not empty")
 
 // ErrSecretKeyExists は、エクスポートファイルの秘密鍵と同じ keygrip の .key がゲストに
-// あるので、インポートしなかったことを表す（上書きもマージもしない）。
+// あるので、インポートしなかったことを表す（上書きもマージもしない）。Import は
+// *SecretKeyExistsError で返す（errors.Is で ErrSecretKeyExists と見分けられる）。
 var ErrSecretKeyExists = errors.New("secret key file already exists")
+
+// SecretKeyExistsError は、どの鍵の .key がゲストにすでにあったかを持つ ErrSecretKeyExists。
+type SecretKeyExistsError struct {
+	// Keygrips は、ゲストにすでにあった .key の keygrip。画面に出すためのもので、
+	// Error() には入れない（ログに keygrip を出さない）。
+	Keygrips []string
+}
+
+func (e *SecretKeyExistsError) Error() string {
+	return fmt.Sprintf("%s (%d keys)", ErrSecretKeyExists, len(e.Keygrips))
+}
+
+func (e *SecretKeyExistsError) Is(target error) bool { return target == ErrSecretKeyExists }
+
+// secretKeyExists は names（<keygrip>.key）の *SecretKeyExistsError を作る。
+func secretKeyExists(names ...string) error {
+	grips := make([]string, len(names))
+	for i, name := range names {
+		grips[i] = strings.TrimSuffix(name, ".key")
+	}
+	return &SecretKeyExistsError{Keygrips: grips}
+}
 
 // InvalidExportFileError は、送られたものがエクスポートファイルとして受け付けられないことを表す。
 // 何も戻していない。
@@ -83,8 +106,15 @@ func invalid(reason string) error {
 	return &InvalidExportFileError{Reason: reason}
 }
 
-// maxImportBytes は、展開するファイルの大きさの合計の上限（gzip で膨らむものを拒むため）。
-const maxImportBytes = 1 << 30
+// インポートで展開するものの上限。取り違えたファイルや、gzip で膨らむものでディスクを
+// 埋めないため。数字は README の「インポート」に書いたものと揃える。
+const (
+	// maxImportBytes は、展開する通常ファイルの大きさの合計の上限。
+	maxImportBytes = 256 << 20
+	// maxImportFiles は、エクスポートファイルに入っているファイル（ディレクトリ、
+	// シンボリックリンクを含む）の数の上限。
+	maxImportFiles = 50000
+)
 
 // StoreEmpty は、ストアのディレクトリ storeDir がないか空かを返す。インポートを受け付けるのは
 // このときだけ。
@@ -128,8 +158,8 @@ var keyFileName = regexp.MustCompile(`^[0-9A-Fa-f]{40}\.key$`)
 // ストアを消す。取り込んだ公開鍵と ownertrust は残す。一時ディレクトリは最後に消す。
 //
 // ストアのディレクトリが空でなければ ErrStoreNotEmpty を、同じ keygrip の .key がゲストに
-// あれば ErrSecretKeyExists を返し、何も書かない。パスフレーズは扱わないので、戻した鍵で
-// 復号できるかは確かめない。呼び出しはプロセス内で直列化する。
+// あれば *SecretKeyExistsError（ErrSecretKeyExists）を返し、何も書かない。パスフレーズは
+// 扱わないので、戻した鍵で復号できるかは確かめない。呼び出しはプロセス内で直列化する。
 func Import(ctx context.Context, r io.Reader, opts ImportOptions) (ImportSummary, error) {
 	importMu.Lock()
 	defer importMu.Unlock()
@@ -220,22 +250,28 @@ func secretKeyDir(ctx context.Context, g *gpg) (string, error) {
 }
 
 // checkNoSecretKeys は、keyDir に names（<keygrip>.key）のどれもないことを確かめる。
+// あれば、あったものすべてを *SecretKeyExistsError で返す。
 func checkNoSecretKeys(keyDir string, names []string) error {
+	var found []string
 	for _, name := range names {
 		_, err := os.Lstat(filepath.Join(keyDir, name))
 		if err == nil {
-			return ErrSecretKeyExists
+			found = append(found, name)
+			continue
 		}
 		if !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("check a secret key file in %s: %w", keyDir, unwrapPath(err))
 		}
+	}
+	if len(found) > 0 {
+		return secretKeyExists(found...)
 	}
 	return nil
 }
 
 // placeSecretKeys は src の names（<keygrip>.key）を keyDir（なければ 0700 で作る）に 0600 で
 // 置き、置いたもののパスを返す（途中で失敗しても、それまでに置いたものを返す）。
-// 返すエラーには keygrip を入れない。
+// 返すエラーの文には keygrip を入れない。
 func placeSecretKeys(src, keyDir string, names []string) ([]string, error) {
 	if err := os.MkdirAll(keyDir, 0o700); err != nil {
 		return nil, err
@@ -253,7 +289,7 @@ func placeSecretKeys(src, keyDir string, names []string) ([]string, error) {
 		err = writeNew(dst, in, 0o600, func() { placed = append(placed, dst) })
 		in.Close()
 		if errors.Is(err, fs.ErrExist) {
-			return placed, ErrSecretKeyExists
+			return placed, secretKeyExists(name)
 		}
 		if err != nil {
 			return placed, fmt.Errorf("write a secret key file in %s: %w", keyDir, unwrapPath(err))
@@ -325,6 +361,7 @@ func extract(ctx context.Context, r io.Reader, dir string) (layout, error) {
 	seen := map[string]bool{}    // 書いたパス（最上位のディレクトリからの相対パス）
 	links := map[string]string{} // store/ の下のシンボリックリンク（store/ からの相対パス → リンク先）
 	var total int64
+	files := 0
 	for {
 		if err := ctx.Err(); err != nil {
 			return layout{}, err
@@ -338,6 +375,9 @@ func extract(ctx context.Context, r io.Reader, dir string) (layout, error) {
 		}
 		if h.Typeflag == tar.TypeXGlobalHeader {
 			continue
+		}
+		if files++; files > maxImportFiles {
+			return layout{}, invalid(fmt.Sprintf("ファイルが多すぎます（上限は %d 個）", maxImportFiles))
 		}
 		parts, ok := splitName(h.Name)
 		if !ok {
@@ -376,7 +416,7 @@ func extract(ctx context.Context, r io.Reader, dir string) (layout, error) {
 			}
 		case tar.TypeReg:
 			if h.Size > maxImportBytes-total {
-				return layout{}, invalid("大きすぎます")
+				return layout{}, invalid(fmt.Sprintf("展開すると大きすぎます（上限は合計 %d MiB）", maxImportBytes>>20))
 			}
 			total += h.Size
 			if err := writeNew(p, exportFileReader{tr}, 0o600, nil); errors.Is(err, fs.ErrExist) {

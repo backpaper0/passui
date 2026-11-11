@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -41,6 +42,19 @@ func buildArchive(t *testing.T, entries ...tarEntry) []byte {
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
+	writeEntries(t, tw, entries)
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// writeEntries は entries をこの順に tw に書く。
+func writeEntries(t *testing.T, tw *tar.Writer, entries []tarEntry) {
+	t.Helper()
 	for _, e := range entries {
 		h := &tar.Header{Name: e.name, Typeflag: e.typeflag, Mode: e.mode, Linkname: e.link}
 		if e.typeflag == tar.TypeReg {
@@ -55,13 +69,6 @@ func buildArchive(t *testing.T, entries ...tarEntry) []byte {
 			}
 		}
 	}
-	if err := tw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gz.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return buf.Bytes()
 }
 
 // keylessLayout は、ストアの鍵がない（.gpg-id のないストアの）エクスポートファイルの配置を、
@@ -269,6 +276,89 @@ func TestImportRejectsUnsafeOrMalformedArchives(t *testing.T) {
 			assertEmptyDir(t, tmp)
 		})
 	}
+}
+
+// 展開後の合計が 256 MiB を超えるもの、ファイル（ディレクトリを含む）が 50,000 を超えるものは、何も書かずに
+// *InvalidExportFileError で拒む（取り違えたファイルでディスクを埋めないため）。
+func TestImportRejectsArchivesOverLimits(t *testing.T) {
+	const maxBytes = 256 << 20
+	tests := map[string]struct {
+		archive []byte
+		reason  string
+	}{
+		"total size": {
+			// 大きいファイルの中身は書かない（ヘッダの大きさだけで断る）。
+			archive: buildArchiveWithHugeFile(t, importTop+"/store/huge", maxBytes-6, keylessLayout(importTop, fileEntry(importTop+"/store/small", "1234567", 0o600))),
+			reason:  "256 MiB",
+		},
+		"files": {
+			archive: buildArchive(t, keylessLayout(importTop, manyDirs(maxImportFiles+1)...)...),
+			reason:  "50000",
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			tmp := importTemp(t)
+			storeDir := filepath.Join(t.TempDir(), "store")
+
+			_, err := export.Import(t.Context(), bytes.NewReader(tt.archive), export.ImportOptions{StoreDir: storeDir})
+
+			var invalid *export.InvalidExportFileError
+			if !errors.As(err, &invalid) {
+				t.Fatalf("Import: %v, want *InvalidExportFileError", err)
+			}
+			if !strings.Contains(invalid.Reason, tt.reason) {
+				t.Errorf("Reason = %q, want it to mention %q", invalid.Reason, tt.reason)
+			}
+			if _, err := os.Lstat(storeDir); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("store dir exists after a rejected import: %v", err)
+			}
+			assertEmptyDir(t, tmp)
+		})
+	}
+}
+
+// 上限ちょうどのファイル数なら受け付ける。
+func TestImportAcceptsArchiveAtFileLimit(t *testing.T) {
+	storeDir := filepath.Join(t.TempDir(), "store")
+	archive := buildArchive(t, keylessLayout(importTop, manyDirs(maxImportFiles)...)...)
+
+	if _, err := export.Import(t.Context(), bytes.NewReader(archive), export.ImportOptions{StoreDir: storeDir}); err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+}
+
+// maxImportFiles は、インポートで受け付けるファイルの数の上限（README に書いたもの）。
+const maxImportFiles = 50000
+
+// manyDirs は、keylessLayout に足すと全体でちょうど total 個になる、store/ の下のディレクトリを返す。
+func manyDirs(total int) []tarEntry {
+	n := total - len(keylessLayout(importTop))
+	dirs := make([]tarEntry, 0, n)
+	for i := range n {
+		dirs = append(dirs, dirEntry(fmt.Sprintf("%s/store/d%05d/", importTop, i), 0o700))
+	}
+	return dirs
+}
+
+// buildArchiveWithHugeFile は、entries の後に、大きさ size のヘッダだけを持つ通常ファイル name を
+// 入れた tar.gz を返す（中身は書かないので、読む側は中身の途中で切れたものとして見る）。
+func buildArchiveWithHugeFile(t *testing.T, name string, size int64, entries []tarEntry) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	writeEntries(t, tw, entries)
+	if err := tw.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: 0o600, Size: size}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Flush(); err == nil {
+		t.Fatal("Flush succeeded without the body")
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
 }
 
 // tar.gz でないものは *InvalidExportFileError で拒む。
