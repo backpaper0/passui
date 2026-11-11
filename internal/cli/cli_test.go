@@ -102,8 +102,6 @@ func TestServeRejectsInvalidConfig(t *testing.T) {
 		{"PASSUI_PORT=65536", "PASSUI_PORT"},
 		{"PASSUI_PORT=", "PASSUI_PORT"},
 		{"PASSUI_LOG_LEVEL=trace", "PASSUI_LOG_LEVEL"},
-		{"PASSUI_BACKUP_DIR=backup", "PASSUI_BACKUP_DIR"},
-		{"PASSUI_BACKUP_DIR=", "PASSUI_BACKUP_DIR"},
 	} {
 		r := run(t, []string{path, tc.env}, "serve")
 		if r.code != 1 {

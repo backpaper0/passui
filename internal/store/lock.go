@@ -106,7 +106,7 @@ func (p *Pass) recipients(dir string) []string {
 // KeyIDs は、ストアのディレクトリ storeDir の中のすべての .gpg-id（ルートとサブフォルダ）に
 // 書かれたストアの鍵の ID を、書かれた順に重複を除いて返す。読めない .gpg-id は飛ばし、
 // 1 つも読めなければ nil。ID は .gpg-id に書かれたまま（指紋とは限らない）。
-// ロックとバックアップが共有する。
+// ロックとエクスポートが共有する。
 func KeyIDs(ctx context.Context, storeDir string) ([]string, error) {
 	var ids []string
 	err := walkStore(ctx, storeDir, func(dir, rel string, files []fs.DirEntry) {

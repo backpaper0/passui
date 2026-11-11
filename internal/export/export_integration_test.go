@@ -1,9 +1,9 @@
-package backup_test
+package export_test
 
 import (
 	"testing"
 
-	"github.com/backpaper0/passui/internal/backup"
+	"github.com/backpaper0/passui/internal/export"
 	"github.com/backpaper0/passui/internal/passuitest"
 )
 
@@ -13,8 +13,8 @@ func TestIntegrationWriteWhileLockedSucceedsAndKeepsLocked(t *testing.T) {
 	g.Insert("bank", h.Canary("password"))
 	g.Lock()
 
-	sum, err := backup.Write(t.Context(), backup.Options{
-		StoreDir: g.Dir, Dir: t.TempDir(), Now: at, Version: "dev", Env: g.Env(),
+	sum, err := writeExport(t, t.Context(), t.TempDir(), export.Options{
+		StoreDir: g.Dir, Now: at, Version: "dev", Env: g.Env(),
 	})
 	if err != nil {
 		t.Fatalf("Write: %v", err)
@@ -22,7 +22,7 @@ func TestIntegrationWriteWhileLockedSucceedsAndKeepsLocked(t *testing.T) {
 
 	got := readArchive(t, sum.Path)
 	for _, name := range []string{"store/bank.gpg", "store/.gpg-id"} {
-		if _, ok := got["passui-backup-20261105-090807/"+name]; !ok {
+		if _, ok := got["passui-export-20261105-090807/"+name]; !ok {
 			t.Errorf("archive lacks %s; has %v", name, keys(got))
 		}
 	}
@@ -31,6 +31,6 @@ func TestIntegrationWriteWhileLockedSucceedsAndKeepsLocked(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !locked {
-		t.Error("store is unlocked after backup")
+		t.Error("store is unlocked after export")
 	}
 }

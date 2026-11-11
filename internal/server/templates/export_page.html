@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>passui - エクスポート</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/passui.css">
+</head>
+<body class="standalone">
+<main class="standalone-card">
+<h1 class="brand">passui</h1>
+<h2>エクスポート</h2>
+<!-- 成功したときはダウンロードだけが始まるので、このページは失敗したときにだけ出る。 -->
+<div class="export-result" role="alert">
+{{if .UnresolvedKeys}}<p class="error">ストアの鍵が見つかりません: {{range $i, $id := .UnresolvedKeys}}{{if $i}}, {{end}}<code>{{$id}}</code>{{end}}</p>
+<p><code>.gpg-id</code> と <code>PASSWORD_STORE_KEY</code> を確かめてください。</p>
+{{else}}<p class="error">{{.Failure}}</p>
+<p>ログでエラー ID を探してください。</p>
+{{end}}<p>エクスポートファイルは作っていません。</p>
+</div>
+<p><a href="/">トップに戻る</a></p>
+</main>
+</body>
+</html>

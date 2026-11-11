@@ -6,11 +6,12 @@ import (
 	"context"
 	"embed"
 	"html/template"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
 
-	"github.com/backpaper0/passui/internal/backup"
+	"github.com/backpaper0/passui/internal/export"
 	"github.com/backpaper0/passui/internal/secret"
 	"github.com/backpaper0/passui/internal/store"
 )
@@ -36,16 +37,14 @@ type Config struct {
 	Token secret.Value
 	// Store はストア バックエンド。
 	Store store.Backend
-	// BackupDir はバックアップ先（解決済みの絶対パス）。Backup が問題のパスを返さない
-	// 失敗のときに画面とログに出すパスとして使う（実際に置く場所は Backup が決める）。
-	BackupDir string
-	// Backup はバックアップを作ってバックアップ先に置く（POST /backup）。serve は
-	// backup.Write を包んだものを渡す。テストでは偽物に差し替える。
-	Backup BackupFunc
+	// Export はエクスポートファイルを作る（POST /export）。serve は export.Write を
+	// 包んだものを渡す。テストでは偽物に差し替える。New に渡すときは必須。
+	Export ExportFunc
 }
 
-// BackupFunc はバックアップを作ってバックアップ先に置き、その要約を返す。
-type BackupFunc func(ctx context.Context) (backup.Summary, error)
+// ExportFunc はエクスポートファイルを w に書き、その要約を返す。失敗したときに w に
+// 書いたものは捨てられる。
+type ExportFunc func(ctx context.Context, w io.Writer) (export.Summary, error)
 
 // New は passui の http.Handler を返す。すべてのルートに共通のミドルウェアが掛かり、
 // /login と /static/ 以外のルートにはログインが要る。
@@ -76,7 +75,7 @@ func (s *handler) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /entry/{name...}", s.entry)
 	mux.HandleFunc("GET /lock-status", s.lockStatus)
 	mux.HandleFunc("POST /lock", s.lock)
-	mux.HandleFunc("POST /backup", s.backup)
+	mux.HandleFunc("POST /export", s.exportFile)
 	mux.HandleFunc("GET /new", s.newEntryForm)
 	mux.HandleFunc("POST /new", s.createEntry)
 	mux.HandleFunc("GET /edit/{name...}", s.editForm)

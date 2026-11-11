@@ -1,4 +1,4 @@
-package backup_test
+package export_test
 
 import (
 	"bytes"
@@ -8,17 +8,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/backpaper0/passui/internal/backup"
+	"github.com/backpaper0/passui/internal/export"
 	"github.com/backpaper0/passui/internal/passuitest"
 )
 
-// restoreCommands は README.txt の「復元の手順」から、コマンドの行（7 文字下げた行）を
+// restoreCommands は README.txt の「手作業で戻す手順」から、コマンドの行（7 文字下げた行）を
 // 書かれた順に返す。
 func restoreCommands(t *testing.T, readme string) []string {
 	t.Helper()
-	_, steps, ok := strings.Cut(readme, "\n復元の手順\n")
+	_, steps, ok := strings.Cut(readme, "\n手作業で戻す手順\n")
 	if !ok {
-		t.Fatalf("README.txt lacks the restore steps:\n%s", readme)
+		t.Fatalf("README.txt lacks the manual restore steps:\n%s", readme)
 	}
 	var cmds []string
 	for _, line := range strings.Split(steps, "\n") {
@@ -32,7 +32,7 @@ func restoreCommands(t *testing.T, readme string) []string {
 	return cmds
 }
 
-// guest は復元先の、使い捨ての新しいゲスト（HOME、GNUPGHOME、PASSWORD_STORE_DIR）。
+// guest は戻す先の、使い捨ての新しいゲスト（HOME、GNUPGHOME、PASSWORD_STORE_DIR）。
 // GNUPGHOME には、パスフレーズを答える pinentry だけを設定しておく（人が打つ代わり）。
 type guest struct {
 	home, gnupgHome, storeDir string
@@ -87,8 +87,8 @@ func (g *guest) env() []string {
 	return append(env, "HOME="+g.home, "GNUPGHOME="+g.gnupgHome, "PASSWORD_STORE_DIR="+g.storeDir, "LC_ALL=C")
 }
 
-// runRestoreSteps は README.txt の復元の手順のコマンドを、書かれたとおりに ng で、
-// バックアップのファイルがあるディレクトリ dir で実行し、出力を返す。手順に書いてあるとおり、
+// runRestoreSteps は README.txt の手作業で戻す手順のコマンドを、書かれたとおりに ng で、
+// エクスポートファイルがあるディレクトリ dir で実行し、出力を返す。手順に書いてあるとおり、
 // エントリの印だけは entry に置き換える。失敗したらテストを止める。
 func runRestoreSteps(t *testing.T, ng *guest, dir, readme, entry string) string {
 	t.Helper()
@@ -106,7 +106,7 @@ func runRestoreSteps(t *testing.T, ng *guest, dir, readme, entry string) string 
 	return out.String()
 }
 
-// バックアップの README.txt の復元の手順を、そのとおりに別の使い捨てのゲストで実行すると、
+// エクスポートファイルの README.txt の手作業で戻す手順を、そのとおりに別の使い捨てのゲストで実行すると、
 // 元のパスフレーズで pass show が通り、ownertrust が効いて gpg -e -r <指紋> が通る。
 func TestIntegrationRestoreStepsInReadmeRoundTrip(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
@@ -123,8 +123,8 @@ func TestIntegrationRestoreStepsInReadmeRoundTrip(t *testing.T) {
 	g.Lock()
 
 	dest := t.TempDir()
-	sum, err := backup.Write(t.Context(), backup.Options{
-		StoreDir: g.Dir, Dir: dest, Now: at, Version: "dev", Env: g.Env(),
+	sum, err := writeExport(t, t.Context(), dest, export.Options{
+		StoreDir: g.Dir, Now: at, Version: "dev", Env: g.Env(),
 	})
 	if err != nil {
 		t.Fatalf("Write: %v", err)
@@ -143,12 +143,12 @@ func TestIntegrationRestoreStepsInReadmeRoundTrip(t *testing.T) {
 		t.Errorf("restored store lacks bank.gpg: %v", err)
 	}
 	if names := listDir(t, dest); len(names) != 1 {
-		t.Errorf("destination has %v after cleanup, want only the archive", names)
+		t.Errorf("destination has %v after cleanup, want only the export file", names)
 	}
 }
 
-// .gpg-id のない（ストアの鍵が 1 つもない）ストアのバックアップでも、README.txt の
-// 復元の手順はそのとおりに最後まで通り、ストアが戻る。
+// .gpg-id のない（ストアの鍵が 1 つもない）ストアのエクスポートファイルでも、README.txt の
+// 手作業で戻す手順はそのとおりに最後まで通り、ストアが戻る。
 func TestIntegrationRestoreStepsWithoutStoreKeysRunCleanly(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not found")
@@ -167,8 +167,8 @@ func TestIntegrationRestoreStepsWithoutStoreKeysRunCleanly(t *testing.T) {
 		"-c", "commit.gpgsign=false", "commit", "-q", "-m", "no store keys")
 
 	dest := t.TempDir()
-	sum, err := backup.Write(t.Context(), backup.Options{
-		StoreDir: g.Dir, Dir: dest, Now: at, Version: "dev", Env: g.Env(),
+	sum, err := writeExport(t, t.Context(), dest, export.Options{
+		StoreDir: g.Dir, Now: at, Version: "dev", Env: g.Env(),
 	})
 	if err != nil {
 		t.Fatalf("Write: %v", err)

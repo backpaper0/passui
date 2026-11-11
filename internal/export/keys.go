@@ -1,4 +1,4 @@
-package backup
+package export
 
 import (
 	"bytes"
@@ -17,7 +17,7 @@ import (
 )
 
 // UnresolvedKeysError は、ストアの鍵の ID（.gpg-id や PASSWORD_STORE_KEY に書かれたもの）の
-// うち、公開鍵に解決できなかったものがあることを表す。バックアップ先には何も置かない。
+// うち、公開鍵に解決できなかったものがあることを表す。
 type UnresolvedKeysError struct {
 	// IDs は解決できなかった鍵 ID（書かれたまま）。秘密ではないので画面に出してよい。
 	IDs []string
@@ -27,7 +27,7 @@ func (e *UnresolvedKeysError) Error() string {
 	return "store keys not found: " + strings.Join(e.IDs, ", ")
 }
 
-// storeKey はバックアップに入れるストアの鍵 1 つ。
+// storeKey はエクスポートに入れるストアの鍵 1 つ。
 type storeKey struct {
 	// Fingerprint は主鍵の指紋。
 	Fingerprint string
@@ -35,11 +35,11 @@ type storeKey struct {
 	Secrets []secretKey
 }
 
-// gpg はバックアップのために gpg と gpgconf を呼ぶ。ストアにも gpg-agent にも書き込む
+// gpg はエクスポートのために gpg と gpgconf を呼ぶ。ストアにも gpg-agent にも書き込む
 // 呼び出しはしない。
 //
 // ストアの Pass（store パッケージ）は子プロセスの stderr を warn でログに出してエラーには
-// 入れないが、ここでは stderr をエラーに入れて返す。backup はロガーを持たず、失敗のログは
+// 入れないが、ここでは stderr をエラーに入れて返す。export はロガーを持たず、失敗のログは
 // 呼び出し側（server）がエラー ID と一緒に 1 行で出すため（失敗時のログにエラー ID と
 // gpg の stderr を出す、という要件）。ここで呼ぶ gpg の stdin にも stdout にも
 // シークレットは流れない。
@@ -62,7 +62,7 @@ func newGPG(env []string) *gpg {
 // lookPath は env の PATH から実行可能な name を探す。見つからなければ name を
 // そのまま返す（プロセスの PATH で探され、見つからなければ実行のときに失敗する）。
 // cli にも env の PATH から探す lookPath があるが、あちらは起動時の設定の検査で、
-// 見つからなければ日本語のエラーで止める。ここではバックアップの失敗として扱えば
+// 見つからなければ日本語のエラーで止める。ここではエクスポートの失敗として扱えば
 // よいので、パッケージをまたいで共有はしない。
 func lookPath(env []string, name string) string {
 	for _, dir := range filepath.SplitList(lookupEnv(env, "PATH")) {
@@ -80,7 +80,7 @@ func lookPath(env []string, name string) string {
 // run は gpg --batch --no-auto-check-trustdb <args> を呼び、stdout を返す。終了コードが
 // 0 でなければ、stderr を含むエラーを返す（呼び出し側がログに出す）。
 // --no-auto-check-trustdb は、一覧を出すついでに trustdb を検査して trustdb.gpg を
-// 書き換えないため（バックアップは取るだけで、gpg の状態を変えない）。
+// 書き換えないため（エクスポートは取るだけで、gpg の状態を変えない）。
 func (g *gpg) run(ctx context.Context, args ...string) ([]byte, error) {
 	return g.exec(ctx, "gpg", append([]string{"--batch", "--no-auto-check-trustdb"}, args...)...)
 }

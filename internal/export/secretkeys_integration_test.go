@@ -1,4 +1,4 @@
-package backup_test
+package export_test
 
 import (
 	"os"
@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/backpaper0/passui/internal/backup"
+	"github.com/backpaper0/passui/internal/export"
 	"github.com/backpaper0/passui/internal/passuitest"
 )
 
@@ -51,8 +51,8 @@ func TestIntegrationWritePutsSecretKeyFilesOfStoreKeys(t *testing.T) {
 	g := passuitest.NewGPGStore(h)
 	unrelated := g.AddKey("unrelated")
 
-	sum, err := backup.Write(t.Context(), backup.Options{
-		StoreDir: g.Dir, Dir: t.TempDir(), Now: at, Version: "dev", Env: g.Env(),
+	sum, err := writeExport(t, t.Context(), t.TempDir(), export.Options{
+		StoreDir: g.Dir, Now: at, Version: "dev", Env: g.Env(),
 	})
 	if err != nil {
 		t.Fatalf("Write: %v", err)
@@ -110,8 +110,8 @@ func TestIntegrationWritePutsOnlySubkeySecretsOfOfflinePrimaryKey(t *testing.T) 
 		t.Fatalf("primary key is not offline:\n%s", out)
 	}
 
-	sum, err := backup.Write(t.Context(), backup.Options{
-		StoreDir: g.Dir, Dir: t.TempDir(), Now: at, Version: "dev", Env: g.Env(),
+	sum, err := writeExport(t, t.Context(), t.TempDir(), export.Options{
+		StoreDir: g.Dir, Now: at, Version: "dev", Env: g.Env(),
 	})
 	if err != nil {
 		t.Fatalf("Write: %v", err)
@@ -134,8 +134,8 @@ func TestIntegrationWriteNotesStoreKeysWithoutSecretKey(t *testing.T) {
 	public := g.AddPublicKey("public")
 	g.Run("", "pass", "init", "-p", "team", public)
 
-	sum, err := backup.Write(t.Context(), backup.Options{
-		StoreDir: g.Dir, Dir: t.TempDir(), Now: at, Version: "dev", Env: g.Env(),
+	sum, err := writeExport(t, t.Context(), t.TempDir(), export.Options{
+		StoreDir: g.Dir, Now: at, Version: "dev", Env: g.Env(),
 	})
 	if err != nil {
 		t.Fatalf("Write: %v", err)
@@ -167,8 +167,8 @@ func TestIntegrationWriteOmitsNoteWhenAllStoreKeysHaveSecretKey(t *testing.T) {
 	h := passuitest.New(t)
 	g := passuitest.NewGPGStore(h)
 
-	sum, err := backup.Write(t.Context(), backup.Options{
-		StoreDir: g.Dir, Dir: t.TempDir(), Now: at, Version: "dev", Env: g.Env(),
+	sum, err := writeExport(t, t.Context(), t.TempDir(), export.Options{
+		StoreDir: g.Dir, Now: at, Version: "dev", Env: g.Env(),
 	})
 	if err != nil {
 		t.Fatalf("Write: %v", err)
@@ -180,15 +180,15 @@ func TestIntegrationWriteOmitsNoteWhenAllStoreKeysHaveSecretKey(t *testing.T) {
 	}
 }
 
-// ロック中でも .key を入れられ、バックアップの後もロックのまま
+// ロック中でも .key を入れられ、エクスポートの後もロックのまま
 // （gpg-agent にパスフレーズを求めず、キャッシュもされない）。
 func TestIntegrationWriteSecretKeysWhileLockedKeepsLocked(t *testing.T) {
 	h := passuitest.New(t)
 	g := passuitest.NewGPGStore(h)
 	g.Lock()
 
-	sum, err := backup.Write(t.Context(), backup.Options{
-		StoreDir: g.Dir, Dir: t.TempDir(), Now: at, Version: "dev", Env: g.Env(),
+	sum, err := writeExport(t, t.Context(), t.TempDir(), export.Options{
+		StoreDir: g.Dir, Now: at, Version: "dev", Env: g.Env(),
 	})
 	if err != nil {
 		t.Fatalf("Write: %v", err)
@@ -202,11 +202,11 @@ func TestIntegrationWriteSecretKeysWhileLockedKeepsLocked(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !locked {
-		t.Error("store is unlocked after backup")
+		t.Error("store is unlocked after export")
 	}
 }
 
-// .key が読めなければ、バックアップ全体が失敗し、バックアップ先には何も残らない。
+// .key が読めなければ、エクスポート全体が失敗し、何も返さない。
 // エラーはログに出るので、keygrip を含めない。
 func TestIntegrationWriteFailsWhenSecretKeyFileIsUnreadable(t *testing.T) {
 	if os.Geteuid() == 0 {
@@ -219,18 +219,13 @@ func TestIntegrationWriteFailsWhenSecretKeyFileIsUnreadable(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(keyFile(g, grip), 0o600) })
-	dest := t.TempDir()
-
-	_, err := backup.Write(t.Context(), backup.Options{
-		StoreDir: g.Dir, Dir: dest, Now: at, Version: "dev", Env: g.Env(),
+	_, err := writeExport(t, t.Context(), t.TempDir(), export.Options{
+		StoreDir: g.Dir, Now: at, Version: "dev", Env: g.Env(),
 	})
 	if err == nil {
 		t.Fatal("Write succeeded with an unreadable .key")
 	}
 	if strings.Contains(err.Error(), grip) {
 		t.Errorf("error has the keygrip: %v", err)
-	}
-	if names := listDir(t, dest); len(names) != 0 {
-		t.Errorf("destination has %v, want nothing", names)
 	}
 }
